@@ -1,0 +1,18 @@
+[package]
+name = "udev"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitflags = "2.4"
+glob = "0.3"
+heapless = "0.7"
+libc = "0.2"
+log = "0.4"
+
+[dependencies.nix]
+version = "0.27"
+features = ["ioctl"]
+
+[dev-dependencies]
+env_logger = "0.10"
