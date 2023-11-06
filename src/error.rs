@@ -31,6 +31,12 @@ impl From<glob::PatternError> for Error {
     }
 }
 
+impl From<std::ffi::NulError> for Error {
+    fn from(err: std::ffi::NulError) -> Self {
+        Self::Io(format!("invalid FFI C-String: {err}"))
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
