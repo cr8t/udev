@@ -90,6 +90,6 @@ impl Ord for TrieChildEntry {
 
 impl PartialOrd for TrieChildEntry {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        self.c.partial_cmp(&other.c)
+        Some(self.c.cmp(&other.c))
     }
 }

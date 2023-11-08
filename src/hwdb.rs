@@ -245,12 +245,10 @@ impl UdevHwdb {
             if prefix_off > 0 {
                 for (p, c) in trie_string(hwdb_buf, prefix_off).chars().enumerate() {
                     if c == '*' || c == '?' || c == '[' {
-                        return line_buf.trie_fnmatch(list, head, hwdb_buf, &n, p, search);
+                        return line_buf.trie_fnmatch(list, hwdb_buf, &n, p, search);
                     }
                     let i = i.saturating_add(p);
-                    if search_count > i
-                        && Some(c) != search.chars().skip(i.saturating_sub(1)).next()
-                    {
+                    if search_count > i && Some(c) != search.chars().nth(i) {
                         return Ok(());
                     }
                 }
@@ -258,23 +256,23 @@ impl UdevHwdb {
 
             if let Some(child) = n.lookup_child(hwdb_buf, b'*') {
                 line_buf.add_char(b'*')?;
-                line_buf.trie_fnmatch(list, head, hwdb_buf, &child, 0, &search[i..])?;
+                line_buf.trie_fnmatch(list, hwdb_buf, &child, 0, &search[i..])?;
                 line_buf.remove_char();
             }
 
             if let Some(child) = n.lookup_child(hwdb_buf, b'?') {
                 line_buf.add_char(b'?')?;
-                line_buf.trie_fnmatch(list, head, hwdb_buf, &child, 0, &search[i..])?;
+                line_buf.trie_fnmatch(list, hwdb_buf, &child, 0, &search[i..])?;
                 line_buf.remove_char();
             }
 
             if let Some(child) = n.lookup_child(hwdb_buf, b'[') {
                 line_buf.add_char(b'[')?;
-                line_buf.trie_fnmatch(list, head, hwdb_buf, &child, 0, &search[i..])?;
+                line_buf.trie_fnmatch(list, hwdb_buf, &child, 0, &search[i..])?;
                 line_buf.remove_char();
             }
 
-            if search.chars().skip(i.saturating_sub(1)).next() == Some('\0') {
+            if search.chars().nth(i) == Some('\0') {
                 for value in n.values().iter() {
                     Self::_add_property(
                         list,

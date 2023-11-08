@@ -3,7 +3,7 @@ use std::cmp;
 use heapless::Vec;
 
 use super::trie_string;
-use crate::{Error, Result, TrieEntry, TrieHeader, UdevHwdb, UdevList};
+use crate::{Error, Result, TrieEntry, UdevHwdb, UdevList};
 
 /// Maximum length for a file line.
 pub const LINE_MAX: usize = 4096;
@@ -67,7 +67,6 @@ impl LineBuf {
     pub fn trie_fnmatch(
         &mut self,
         list: &mut UdevList,
-        head: &TrieHeader,
         hwdb_buf: &[u8],
         entry: &TrieEntry,
         p: usize,
@@ -98,7 +97,6 @@ impl LineBuf {
             if child_off < hwdb_buf.len() {
                 self.trie_fnmatch(
                     list,
-                    head,
                     hwdb_buf,
                     &TrieEntry::try_from(&hwdb_buf[child_off..])?,
                     0,
