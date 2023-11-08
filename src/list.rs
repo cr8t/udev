@@ -99,6 +99,16 @@ impl UdevList {
         self.list.iter_mut().find(|e| e.name() == name)
     }
 
+    /// Gets the next [UdevEntry] in the list.
+    pub fn next_entry(&self) -> Option<&UdevEntry> {
+        self.list.iter().skip(self.entries_cur.saturating_sub(1)).next()
+    }
+
+    /// Gets the next [UdevEntry] in the list.
+    pub fn next_entry_mut(&mut self) -> Option<&mut UdevEntry> {
+        self.list.iter_mut().skip(self.entries_cur.saturating_sub(1)).next()
+    }
+
     /// Adds an entry to the list.
     ///
     /// If an [UdevEntry] with the same `name` exists, the `value` will be updated.
