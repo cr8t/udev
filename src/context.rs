@@ -1,6 +1,6 @@
-use std::{cmp, fmt, sync::Arc};
+use std::{cmp, fmt, fs, io, sync::Arc};
 
-use crate::{Error, LogPriority, Result, UdevEntryList, UdevList};
+use crate::{file_handle, name_to_handle_at, Error, LogPriority, Result, UdevEntryList, UdevList};
 
 pub const RULES_PATH_LEN: usize = 4;
 
@@ -208,6 +208,49 @@ impl Udev {
     pub fn with_log_priority<P: Into<LogPriority>>(mut self, priority: P) -> Self {
         self.set_log_priority(priority);
         self
+    }
+
+    /// Gets whether `/dev` is mounted on `devtmpfs`.
+    pub fn has_devtmpfs(&self) -> bool {
+        use io::BufRead;
+
+        let mut handle = file_handle::new();
+        let mut mount_id = 0i32;
+
+        if let (Ok(f), Ok(_)) = (
+            fs::OpenOptions::new()
+                .read(true)
+                .open("/proc/self/mountinfo"),
+            name_to_handle_at(libc::AT_FDCWD, "/dev", &mut handle, &mut mount_id, 0),
+        ) {
+            let mut reader = io::BufReader::new(f);
+            let mut line = String::new();
+            let mut ret = false;
+
+            while let Ok(_) = reader.read_line(&mut line) {
+                if let Ok(mid) = line.parse::<i32>() {
+                    if mid != mount_id {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+
+                if let Some(e) = line.find(" - ") {
+                    if let Some(p) = (&line[e..]).strip_prefix(" - ") {
+                        // accept any name that starts with the currently expected type
+                        if p.starts_with("devtmpfs") {
+                            ret = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            ret
+        } else {
+            false
+        }
     }
 }
 

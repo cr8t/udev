@@ -2,8 +2,8 @@ use std::cmp;
 
 use heapless::Vec;
 
-use crate::{Error, Result, TrieEntry, TrieHeader, UdevHwdb, UdevList};
 use super::trie_string;
+use crate::{Error, Result, TrieEntry, TrieHeader, UdevHwdb, UdevList};
 
 /// Maximum length for a file line.
 pub const LINE_MAX: usize = 4096;
@@ -78,7 +78,14 @@ impl LineBuf {
 
         let (start, end) = if p < search.len() {
             // search for nul-terminator, or use the length of the string as terminator
-            (p, search[p..].as_bytes().iter().position(|c| c == &b'\0').unwrap_or(search.len()))
+            (
+                p,
+                search[p..]
+                    .as_bytes()
+                    .iter()
+                    .position(|c| c == &b'\0')
+                    .unwrap_or(search.len()),
+            )
         } else {
             (0, 0)
         };

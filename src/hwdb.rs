@@ -127,11 +127,7 @@ impl UdevHwdb {
     /// ```
     ///
     /// Returns: an optional reference to an [UdevEntry].
-    pub fn get_property_list_entry(
-        &mut self,
-        modalias: &str,
-        _flags: u32,
-    ) -> Option<&UdevEntry> {
+    pub fn get_property_list_entry(&mut self, modalias: &str, _flags: u32) -> Option<&UdevEntry> {
         // For now, do the naive thing, and read the entire HWDB into memory (12M+!!!)
         //
         // Using the BufReader to jump around to all the various offsets will probably be
@@ -146,32 +142,40 @@ impl UdevHwdb {
         //
         // Loading everything into memory at one time also avoids some other tool updating the
         // HWDB while we are parsing it.
-        let file = fs::OpenOptions::new().read(true).open(&self.hwdb_path).map_err(|err|{
-            log::warn!("unable to open HWDB file: {err}");
-        })
-        .ok()?;
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .open(&self.hwdb_path)
+            .map_err(|err| {
+                log::warn!("unable to open HWDB file: {err}");
+            })
+            .ok()?;
 
-        let metadata = file.metadata().map_err(|err| {
-            log::warn!("unable to get HWDB metadata: {err}");
-        })
-        .ok()?;
+        let metadata = file
+            .metadata()
+            .map_err(|err| {
+                log::warn!("unable to get HWDB metadata: {err}");
+            })
+            .ok()?;
 
         let file_len = metadata.len() as usize;
 
         let mut reader = io::BufReader::new(file);
         let mut hwdb_buf = Vec::with_capacity(file_len);
 
-        reader.read_to_end(&mut hwdb_buf).map_err(|err| {
-            log::warn!("error reading HWDB into memory: {err}");
-        })
-        .ok()?;
+        reader
+            .read_to_end(&mut hwdb_buf)
+            .map_err(|err| {
+                log::warn!("error reading HWDB into memory: {err}");
+            })
+            .ok()?;
 
         self.properties_list.clear();
 
-        Self::trie_search(&mut self.properties_list, &self.head, &hwdb_buf, modalias).map_err(|err| {
-            log::warn!("error looking up property list UdevEntry: {err}");
-        })
-        .ok()?;
+        Self::trie_search(&mut self.properties_list, &self.head, &hwdb_buf, modalias)
+            .map_err(|err| {
+                log::warn!("error looking up property list UdevEntry: {err}");
+            })
+            .ok()?;
 
         self.properties_list.entry()
     }
