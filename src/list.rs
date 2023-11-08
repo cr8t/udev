@@ -101,12 +101,12 @@ impl UdevList {
 
     /// Gets the next [UdevEntry] in the list.
     pub fn next_entry(&self) -> Option<&UdevEntry> {
-        self.list.iter().skip(self.entries_cur.saturating_sub(1)).next()
+        self.list.iter().nth(self.entries_cur)
     }
 
     /// Gets the next [UdevEntry] in the list.
     pub fn next_entry_mut(&mut self) -> Option<&mut UdevEntry> {
-        self.list.iter_mut().skip(self.entries_cur.saturating_sub(1)).next()
+        self.list.iter_mut().nth(self.entries_cur)
     }
 
     /// Adds an entry to the list.

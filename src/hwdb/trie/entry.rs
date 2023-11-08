@@ -54,6 +54,11 @@ impl TrieEntry {
             .saturating_add(values_len)
     }
 
+    /// Gets whether the [TrieValueEntry] has no children and values.
+    pub fn is_empty(&self) -> bool {
+        self.children.is_empty() && self.values.is_empty()
+    }
+
     /// Looks up a child node in the HWDB buffer.
     ///
     /// Parameters:

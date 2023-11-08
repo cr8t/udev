@@ -227,7 +227,7 @@ impl Udev {
             let mut line = String::new();
             let mut ret = false;
 
-            while let Ok(_) = reader.read_line(&mut line) {
+            while reader.read_line(&mut line).is_ok() {
                 if let Ok(mid) = line.parse::<i32>() {
                     if mid != mount_id {
                         continue;
@@ -237,7 +237,7 @@ impl Udev {
                 }
 
                 if let Some(e) = line.find(" - ") {
-                    if let Some(p) = (&line[e..]).strip_prefix(" - ") {
+                    if let Some(p) = line[e..].strip_prefix(" - ") {
                         // accept any name that starts with the currently expected type
                         if p.starts_with("devtmpfs") {
                             ret = true;
