@@ -95,7 +95,10 @@ pub fn udev_list_entry_foreach(list: &UdevList, f: fn(&UdevEntry) -> Result<()>)
 ///
 /// Breaks with the original `libudev` API by requiring a reference to the list, instead of a list
 /// entry. This is because the C version uses a linked-list composed of pointers, we don't.
-pub fn udev_list_entry_foreach_mut(list: &mut UdevList, f: fn(&mut UdevEntry) -> Result<()>) -> Result<()> {
+pub fn udev_list_entry_foreach_mut(
+    list: &mut UdevList,
+    f: fn(&mut UdevEntry) -> Result<()>,
+) -> Result<()> {
     for entry in list.iter_mut() {
         f(entry)?;
     }
