@@ -1,10 +1,10 @@
-use std::{
-    cmp, fs,
-    io::{self, BufRead, Read},
-    sync::Arc,
-};
+use std::io::{self, BufRead, Read};
+use std::os::linux::fs::MetadataExt;
+use std::sync::Arc;
+use std::{cmp, env, ffi, fmt, fs, mem, time};
 
 use super::{Error, Mode, Result, Udev, UdevEntry, UdevEntryList, UdevList};
+use crate::util;
 
 /// Maximum number of ENVP entries
 pub const ENVP_LEN: usize = 128;
@@ -19,6 +19,7 @@ pub const UEVENT_FILE_LIMIT: usize = 0x1000;
 #[derive(Clone, Debug, PartialEq)]
 pub struct UdevDevice {
     udev: Arc<Udev>,
+    parent_device: Option<Arc<Self>>,
     syspath: String,
     devpath: String,
     sysname: String,
@@ -70,6 +71,7 @@ impl UdevDevice {
 
         Self {
             udev,
+            parent_device: None,
             syspath: String::new(),
             devpath: String::new(),
             sysname: String::new(),
@@ -110,6 +112,17 @@ impl UdevDevice {
             db_persist: false,
         }
     }
+
+    /// Gets a reference to the [Udev] context.
+    pub fn udev(&self) -> &Udev {
+        self.udev.as_ref()
+    }
+
+    /// Gets a cloned reference to the [Udev] context.
+    pub fn udev_cloned(&self) -> Arc<Udev> {
+        Arc::clone(&self.udev)
+    }
+
     /// Creates a new [UdevDevice].
     pub fn new_from_nulstr(udev: Arc<Udev>, buf: &[u8]) -> Result<Self> {
         let mut device = Self::new(udev);
@@ -127,6 +140,413 @@ impl UdevDevice {
         device.add_property_from_string_parse_finish()?;
 
         Ok(device)
+    }
+
+    /// Creates new [UdevDevice], and fills in information from the sys
+    /// device and the udev database entry.
+    ///
+    /// The `syspath` is the absolute path to the device, including the sys mount point.
+    ///
+    /// The initial refcount is 1, and needs to be decremented to release the resources of the udev device.
+    ///
+    /// Returns: a new [UdevDevice], or `Error`, if it does not exist
+    pub fn new_from_syspath(udev: Arc<Udev>, syspath: &str) -> Result<Self> {
+        if syspath.is_empty() {
+            Err(Error::UdevDevice("empty syspath".into()))
+        } else if !syspath.starts_with("/sys") {
+            Err(Error::UdevDevice(format!("not in sys: {syspath}")))
+        } else if let Some(path) = syspath.strip_prefix("/sys/") {
+            let fullpath = if path.starts_with("/devices/") {
+                let uevent_path = format!("{syspath}/uevent");
+                let _ = fs::File::open(uevent_path.as_str()).map_err(|err| {
+                    Error::UdevDevice(format!("unable to open syspath uevent file: {err}"))
+                })?;
+                uevent_path
+            } else {
+                syspath.into()
+            };
+
+            let dev = Self::new(udev).with_syspath(fullpath);
+            log::trace!("device {dev} has devpath: {}", dev.devpath());
+
+            Ok(dev)
+        } else {
+            Err(Error::UdevDevice("empty syspath subdir".into()))
+        }
+    }
+
+    /// Creates new [UdevDevice].
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Fills in information from the `sys` device and the udev database entry.
+    ///
+    /// The device is looked-up by its major/minor number and type. Character and block device
+    /// numbers are not unique across the two types.
+    /// ```
+    ///
+    /// Parameters:
+    ///
+    /// - `udev`: [Udev] library context
+    /// - `type`: `char` or `block` device
+    /// - `devnum`: device major/minor number
+    ///
+    /// Returns: a new [UdevDevice], or `Err`, if it does not exist
+    pub fn new_from_devnum(udev: Arc<Udev>, devtype: &str, devnum: libc::dev_t) -> Result<Self> {
+        let type_str = match devtype {
+            t if t.starts_with('b') => Ok("block"),
+            t if t.starts_with('c') => Ok("char"),
+            _ => Err(Error::UdevDevice(format!("invalid device type: {devtype}"))),
+        }?;
+
+        // use /sys/dev/{block,char}/<maj>:<min> link
+        let path = format!(
+            "/sys/dev/{type_str}/{}:{}",
+            util::major(devnum),
+            util::minor(devnum)
+        );
+        Self::new_from_syspath(udev, &path)
+    }
+
+    /// Creates a new [UdevDevice] from the subsystem and sysname.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Fills in information from the sys device and the udev database entry.
+    ///
+    /// The device is looked up by the subsystem and name string of the device, like "mem" / "zero", or "block" / "sda".
+    /// ```
+    ///
+    /// Parameters:
+    ///
+    /// - `udev`: [Udev] library context
+    /// - `subsystem`: the subsystem of the device
+    /// - `sysname`: the name of the device
+    ///
+    /// Returns: a new [UdevDevice], or `Err`, if it does not exist
+    pub fn new_from_subsystem_sysname(
+        udev: Arc<Udev>,
+        subsystem: &str,
+        sysname: &str,
+    ) -> Result<Self> {
+        let path = if subsystem == "subsystem" {
+            let sub_path = format!("/sys/subsystem/{sysname}");
+            let bus_path = format!("/sys/bus/{sysname}");
+            let class_path = format!("/sys/class/{sysname}");
+
+            if fs::metadata(sub_path.as_str()).is_ok() {
+                Ok(sub_path)
+            } else if fs::metadata(bus_path.as_str()).is_ok() {
+                Ok(bus_path)
+            } else if fs::metadata(class_path.as_str()).is_ok() {
+                Ok(class_path)
+            } else {
+                Err(Error::UdevDevice(format!(
+                    "no subsystem device found for: {sysname}"
+                )))
+            }
+        } else if subsystem == "module" {
+            let path = format!("/sys/module/{sysname}");
+            if fs::metadata(path.as_str()).is_ok() {
+                Ok(path)
+            } else {
+                Err(Error::UdevDevice(format!(
+                    "no module device found for: {sysname}"
+                )))
+            }
+        } else if subsystem == "drivers" {
+            if let Some(driver) = sysname.split(':').nth(2) {
+                let sub_path = format!("/sys/subsystem/{sysname}/drivers/{driver}");
+                let bus_path = format!("/sys/bus/{sysname}/drivers/{driver}");
+
+                if fs::metadata(sub_path.as_str()).is_ok() {
+                    Ok(sub_path)
+                } else if fs::metadata(bus_path.as_str()).is_ok() {
+                    Ok(bus_path)
+                } else {
+                    Err(Error::UdevDevice(format!(
+                        "no driver device found for: {sysname}"
+                    )))
+                }
+            } else {
+                Err(Error::UdevDevice(format!(
+                    "invalid driver subsystem: {sysname}"
+                )))
+            }
+        } else {
+            let sub_path = format!("/sys/subsystem/{subsystem}/devices/{sysname}");
+            let bus_path = format!("/sys/bus/{subsystem}/devices/{sysname}");
+            let class_path = format!("/sys/class/{subsystem}/{sysname}");
+
+            if fs::metadata(sub_path.as_str()).is_ok() {
+                Ok(sub_path)
+            } else if fs::metadata(bus_path.as_str()).is_ok() {
+                Ok(bus_path)
+            } else if fs::metadata(class_path.as_str()).is_ok() {
+                Ok(class_path)
+            } else {
+                Err(Error::UdevDevice(format!("no device found for: {sysname}")))
+            }
+        }?;
+
+        Self::new_from_syspath(udev, &path)
+    }
+
+    /// Create new [UdevDevice] from an ID string.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    ///
+    /// Fill in information from the sys device and the udev database entry.
+    ///
+    /// The device is looked-up by a special string:
+    ///
+    ///   b8:2          - block device major:minor
+    ///   c128:1        - char device major:minor
+    ///   n3            - network device ifindex
+    ///   +sound:card29 - kernel driver core subsystem:device name
+    /// ```
+    ///
+    /// Parameters:
+    ///
+    /// - `udev`: udev library context
+    /// - `id`: text string identifying a kernel device
+    ///
+    /// Returns: a new [UdevDevice], or `Err`, if it does not exist
+    pub fn new_from_device_id(udev: Arc<Udev>, id: &str) -> Result<Self> {
+        match id.chars().next() {
+            Some('b') | Some('c') => {
+                let devtype = &id[..1];
+
+                let mut maj_min_iter = id[1..].split(':');
+                let maj = maj_min_iter
+                    .next()
+                    .unwrap_or("")
+                    .parse::<u32>()
+                    .unwrap_or(0);
+                let min = maj_min_iter
+                    .next()
+                    .unwrap_or("")
+                    .parse::<u32>()
+                    .unwrap_or(0);
+
+                Self::new_from_devnum(udev, devtype, libc::makedev(maj, min))
+            }
+            Some('n') => {
+                let ifindex = id[1..].parse::<i32>().map_err(|err| {
+                    Error::UdevDevice(format!("invalid network device ID: {id}, error: {err}"))
+                })?;
+                // SAFETY: all arguments are valid, and properly initialized.
+                let sock = unsafe { libc::socket(libc::PF_INET, libc::SOCK_DGRAM, 0) };
+                if sock < 0 {
+                    let errno = io::Error::last_os_error();
+                    return Err(Error::UdevDevice(format!(
+                        "unable to create a socket: {errno}"
+                    )));
+                }
+
+                // SAFETY: zeroed memory initializes `libc::ifreq` to a valid state.
+                let mut ifr: libc::ifreq = unsafe { mem::zeroed() };
+                ifr.ifr_ifru.ifru_ifindex = ifindex;
+                // SAFETY: all arguments are valid, pointers reference valid memory, and `SICGIFNAME` is a valid ioctl
+                if unsafe { libc::ioctl(sock, libc::SIOCGIFNAME, &mut ifr) } != 0 {
+                    let errno = io::Error::last_os_error();
+                    // SAFETY: `sock` is a valid socket file descriptor returned by the kernel
+                    unsafe { libc::close(sock) };
+                    return Err(Error::UdevDevice(format!(
+                        "invalid interface name: {errno}"
+                    )));
+                }
+                // SAFETY: `sock` is a valid socket file descriptor returned by the kernel
+                unsafe { libc::close(sock) };
+
+                // SAFETY: `ifr_name` is a C-string returned by the kernel.
+                // Unless something went horribly wrong, it will be a valid, nul-terminated C-string.
+                let cifr_name = unsafe { ffi::CStr::from_ptr(ifr.ifr_name.as_ptr()) };
+                let ifr_name = cifr_name.to_str().map_err(|err| {
+                    Error::UdevDevice(format!("unable to convert ifr_name to Rust string: {err}"))
+                })?;
+
+                let mut dev = Self::new_from_subsystem_sysname(udev, "net", ifr_name)?;
+                if dev.get_ifindex() == ifindex {
+                    Ok(dev)
+                } else {
+                    Err(Error::UdevDevice(
+                        "unable to create device from ID string".into(),
+                    ))
+                }
+            }
+            Some('+') => {
+                let mut subsys_iter = id[1..].split(':');
+                let subsys = subsys_iter.next().ok_or(Error::UdevDevice(format!(
+                    "invalid subsystem from ID: {id}"
+                )))?;
+                let sysname = subsys_iter.next().ok_or(Error::UdevDevice(format!(
+                    "invalid system name from ID: {id}"
+                )))?;
+
+                Self::new_from_subsystem_sysname(udev, subsys, sysname)
+            }
+            _ => Err(Error::UdevDevice(format!("invalid device ID: {id}"))),
+        }
+    }
+
+    /// Create new udev device from the environment information.
+    ///
+    /// From the original `libudev` documnentation:
+    ///
+    /// ```no_build,no_run
+    /// Fills in information from the current process environment.
+    /// This only works reliable if the process is called from a udev rule.
+    /// It is usually used for tools executed from IMPORT= rules.
+    /// ```
+    ///
+    /// Parameters:
+    ///
+    /// - `udev`: [Udev] library context
+    ///
+    /// Returns: a new [UdevDevice], or `Err`, if it does not exist
+    pub fn new_from_environment(udev: Arc<Udev>) -> Result<Self> {
+        let mut dev = Self::new(udev);
+        dev.set_info_loaded(true);
+
+        for (key, value) in env::vars() {
+            dev.add_property_from_string_parse(format!("{key}={value}").as_str())?;
+        }
+
+        dev.add_property_from_string_parse_finish()?;
+
+        Ok(dev)
+    }
+
+    /// Creates a new [UdevDevice] from the next parent directory in the syspath.
+    ///
+    /// Returns an `Err` if no parent is found.
+    pub fn new_from_parent(&self) -> Result<Self> {
+        let path = self.syspath();
+        let subdir = path
+            .strip_prefix("/sys/")
+            .ok_or(Error::UdevDevice(format!("invalid syspath: {path}")))?;
+
+        let mut pos = subdir.len();
+        let syslen = "/sys/".len();
+        loop {
+            // do a reverse search for the next parent directory on the syspath
+            pos = subdir[..pos]
+                .rfind('/')
+                .ok_or(Error::UdevDevice("no syspath subdirectory".into()))?;
+            if pos < 2 {
+                break;
+            }
+            if let Ok(dev) =
+                Self::new_from_syspath(self.udev_cloned(), &path[..syslen.saturating_add(pos)])
+            {
+                return Ok(dev);
+            }
+        }
+
+        Err(Error::UdevDevice(format!(
+            "no parent device found for syspath: {path}"
+        )))
+    }
+
+    /// Gets the next parent [UdevDevice].
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Find the next parent device, and fill in information from the sys
+    /// device and the udev database entry.
+    ///
+    /// @udev_device: the device to start searching from
+    ///
+    /// Returned device is not referenced. It is attached to the child
+    /// device, and will be cleaned up when the child device is cleaned up.
+    ///
+    /// It is not necessarily just the upper level directory, empty or not
+    /// recognized sys directories are ignored.
+    ///
+    /// It can be called as many times as needed, without caring about
+    /// references.
+    /// ```
+    ///
+    /// Returns: a new [UdevDevice], or `Err`, if it no parent exists.
+    pub fn get_parent(&mut self) -> Result<Arc<Self>> {
+        match self.parent_device.as_ref() {
+            Some(dev) => Ok(Arc::clone(dev)),
+            None => {
+                let dev = Arc::new(self.new_from_parent()?);
+                self.parent_device = Some(Arc::clone(&dev));
+                Ok(dev)
+            }
+        }
+    }
+
+    /// Gets the next parent [UdevDevice] based on `subsystem` and `devtype`.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Find the next parent device, with a matching subsystem and devtype
+    /// value, and fill in information from the sys device and the udev
+    /// database entry.
+    ///
+    /// If devtype is #NULL, only subsystem is checked, and any devtype will
+    /// match.
+    ///
+    /// Returned device is not referenced. It is attached to the child
+    /// device, and will be cleaned up when the child device is cleaned up.
+    ///
+    /// It can be called as many times as needed, without caring about
+    /// references.
+    /// ```
+    ///
+    /// Parameters:
+    ///
+    /// - `udev_device`: udev device to start searching from
+    /// - `subsystem`: the subsystem of the device
+    /// - `devtype`: the type (DEVTYPE) of the device
+    ///
+    /// Returns: a new [UdevDevice], or `Err` if no matching parent exists.
+    pub fn get_parent_with_subsystem_devtype(
+        &mut self,
+        subsystem: &str,
+        devtype: &str,
+    ) -> Result<Arc<Self>> {
+        let mut ret = Err(Error::UdevDevice("no matching parent device found".into()));
+        let mut parent_res = self.new_from_parent();
+
+        while let Ok(mut parent) = parent_res {
+            let parent_subsystem = parent.get_subsystem().to_owned();
+            let parent_devtype = parent.get_devtype().to_owned();
+
+            if !parent_subsystem.is_empty()
+                && parent_subsystem.as_str() == subsystem
+                && !parent_devtype.is_empty()
+                && parent_devtype.as_str() == devtype
+            {
+                let dev = Arc::new(parent);
+                self.parent_device = Some(Arc::clone(&dev));
+
+                // not a real error, but breaks the while loop next iteration
+                parent_res = Err(Error::UdevDevice("set parent device".into()));
+                // set a successful return value
+                ret = Ok(dev);
+            } else {
+                // try the next parent device
+                parent_res = parent.new_from_parent();
+            }
+        }
+
+        ret
+    }
+
+    /// Gets whether a parent [UdevDevice] is set.
+    pub const fn parent_set(&self) -> bool {
+        self.parent_device.is_some()
     }
 
     /// Gets the [UdevDevice] syspath.
@@ -207,6 +627,23 @@ impl UdevDevice {
     pub fn with_devnode<P: Into<String>>(mut self, devnode: P) -> Self {
         self.set_devnode(devnode);
         self
+    }
+
+    /// Gets the [UdevDevice] `devnode`.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Retrieve the device node file name belonging to the udev device.
+    /// The path is an absolute path, and starts with the device directory.
+    /// ```
+    ///
+    /// Returns: the device node file name of the [UdevDevice], or an empty string if none exists.
+    pub fn get_devnode(&mut self) -> &str {
+        if self.devnode.is_empty() && !self.info_loaded {
+            self.read_uevent_file().ok();
+        }
+        self.devnode.as_str()
     }
 
     /// Gets the [UdevDevice] devnode [Mode].
@@ -316,6 +753,16 @@ impl UdevDevice {
         self
     }
 
+    /// Gets the devtypes string of the [UdevDevice].
+    ///
+    /// If the devtype is unset, attempts to read properties from the syspath file.
+    pub fn get_devtype(&mut self) -> &str {
+        if self.devtype.is_empty() {
+            self.read_uevent_file().ok();
+        }
+        self.devtype.as_str()
+    }
+
     /// Gets the [UdevDevice] driver.
     pub fn driver(&self) -> &str {
         self.driver.as_str()
@@ -330,6 +777,16 @@ impl UdevDevice {
     pub fn with_driver<P: Into<String>>(mut self, driver: P) -> Self {
         self.set_driver(driver);
         self
+    }
+
+    /// Gets the kernel driver name.
+    ///
+    /// Returns: the kernel driver name, or `None`  if none is attached.
+    pub fn get_driver(&mut self) -> Option<&str> {
+        if self.driver.is_empty() {
+            self.driver = Udev::get_sys_core_link_value("driver", self.syspath.as_str()).ok()?;
+        }
+        Some(self.driver.as_str())
     }
 
     /// Gets the [UdevDevice] action.
@@ -378,6 +835,54 @@ impl UdevDevice {
     pub fn with_id_filename<P: Into<String>>(mut self, id_filename: P) -> Self {
         self.set_id_filename(id_filename);
         self
+    }
+
+    /// Gets the ID filename.
+    ///
+    /// If the filename is empty, attempts to set it based on subsystem information.
+    ///
+    /// Returns: the ID filename, or an empty string if none can be constructed.
+    pub fn get_id_filename(&mut self) -> &str {
+        let id_filename = if self.id_filename.is_empty() {
+            if self.get_subsystem().is_empty() {
+                String::new()
+            } else if util::major(self.get_devnum()) > 0 {
+                // From `libudev` documentation:
+                //
+                // use devtype: <type><major>:<minor>, e.g. b259:131072, c254:0
+                let devtype = if self.get_subsystem() == "block" {
+                    'b'
+                } else {
+                    'c'
+                };
+                let devnum = self.devnum();
+                let major = util::major(devnum);
+                let minor = util::minor(devnum);
+                format!("{devtype}{major}:{minor}")
+            } else if self.get_ifindex() > 0 {
+                // From `libudev` documentation:
+                //
+                // use netdev ifindex: <type><ifindex>, e.g. n3
+                format!("n{}", self.ifindex)
+            } else if let Some(sysname) = self.devpath.clone().rsplit('/').next() {
+                // From `libudev` documentation:
+                //
+                // use $subsys:$sysname, e.g. pci:0000:00:1f.2
+                // sysname() has '!' translated, get it from devpath
+                format!("+{}:{sysname}", self.get_subsystem())
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        if id_filename.is_empty() {
+            ""
+        } else {
+            self.id_filename = id_filename;
+            self.id_filename()
+        }
     }
 
     /// Gets a reference to the list of `envp` arguments.
@@ -481,6 +986,33 @@ impl UdevDevice {
         &mut self.devlinks_list
     }
 
+    /// Gets the next entry in the `devlinks` list.
+    pub fn devlinks_list_entry(&self) -> Option<&UdevEntry> {
+        self.devlinks_list.next_entry()
+    }
+
+    /// Gets the list of device links for the [UdevDevice].
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Retrieve the list of device links pointing to the device file of
+    /// the udev device. The next list entry can be retrieved with
+    /// udev_list_entry_get_next(), which returns #NULL if no more entries exist.
+    ///
+    /// The devlink path can be retrieved from the list entry by
+    /// udev_list_entry_get_name(). The path is an absolute path, and starts with
+    /// the device directory.
+    /// ```
+    ///
+    /// Returns: the first entry of the device node link list
+    pub fn get_devlinks_list_entry(&mut self) -> Option<&UdevEntry> {
+        if !self.info_loaded {
+            self.read_db().ok()?;
+        }
+        self.devlinks_list_entry()
+    }
+
     /// Sets the [UdevDevice] `devlinks_list` [UdevList].
     pub fn set_devlinks_list<U: Into<UdevEntryList>>(&mut self, devlinks_list: U) {
         self.devlinks_list.set_list(devlinks_list);
@@ -517,6 +1049,11 @@ impl UdevDevice {
     pub fn with_properties_list<U: Into<UdevEntryList>>(mut self, properties_list: U) -> Self {
         self.set_properties_list(properties_list);
         self
+    }
+
+    /// Gets the value of a given property.
+    pub fn get_property_value(&self, key: &str) -> Option<&str> {
+        self.properties_list.entry_by_name(key).map(|e| e.value())
     }
 
     /// Gets a reference to the [UdevDevice] `sysattr_value_list` [UdevList].
@@ -564,6 +1101,87 @@ impl UdevDevice {
         self
     }
 
+    /// Gets the first entry in the `sysattr` properties list.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Retrieve the list of available sysattrs, with value being empty;
+    /// This just return all available sysfs attributes for a particular
+    /// device without reading their values.
+    /// ```
+    ///
+    /// Returns: the first entry of the property list
+    pub fn get_sysattr_list_entry(&mut self) -> Option<&UdevEntry> {
+        let num = if !self.sysattr_list_read {
+            self.get_sysattr_list_read().ok()?
+        } else {
+            0
+        };
+        if num > 0 {
+            None
+        } else {
+            self.sysattr_list.entry()
+        }
+    }
+
+    /// Gets the sys attribute file value.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// The retrieved value is cached in the device. Repeated calls will return the same
+    /// value and not open the attribute again.
+    /// ```
+    ///
+    /// Returns: the content of a sys attribute file, or `None` if there is no sys attribute value.
+    pub fn get_sysattr_value(&mut self, sysattr: &str) -> Option<String> {
+        match self.sysattr_value_list.entry_by_name(sysattr).cloned() {
+            Some(entry) => Some(entry.value().to_owned()),
+            None => {
+                let path = format!("{}/{sysattr}", self.syspath);
+                match fs::metadata(path.as_str()) {
+                    Ok(metadata) => {
+                        if metadata.is_symlink() {
+                            if sysattr == "driver" || sysattr == "subsystem" || sysattr == "module"
+                            {
+                                let value =
+                                    Udev::get_sys_core_link_value(sysattr, self.syspath.as_str())
+                                        .ok()?;
+                                Some(
+                                    self.sysattr_value_list
+                                        .add_entry(sysattr, value.as_str())?
+                                        .value()
+                                        .to_owned(),
+                                )
+                            } else {
+                                None
+                            }
+                        } else if metadata.is_dir()
+                            || metadata.len() == 0
+                            || metadata.st_mode() & libc::S_IRUSR == 0
+                        {
+                            None
+                        } else {
+                            let mut file = fs::File::open(path.as_str()).ok()?;
+                            let mut value = [0u8; 4096];
+                            let read = file.read(&mut value).ok()?;
+                            let value_str =
+                                std::str::from_utf8(value[..read].as_ref()).unwrap_or("");
+                            let entry = self.sysattr_value_list.add_entry(sysattr, value_str)?;
+
+                            Some(entry.value().to_owned())
+                        }
+                    }
+                    Err(_) => {
+                        self.sysattr_value_list.add_entry(sysattr, "");
+                        None
+                    }
+                }
+            }
+        }
+    }
+
     /// Gets a reference to the [UdevDevice] `tags_list` [UdevList].
     pub const fn tags_list(&self) -> &UdevList {
         &self.tags_list
@@ -585,6 +1203,49 @@ impl UdevDevice {
         self
     }
 
+    /// Gets the first tags list entry in the [UdevDevice].
+    pub fn tags_list_entry(&self) -> Option<&UdevEntry> {
+        self.tags_list.entry()
+    }
+
+    /// Gets the first tags list entry in the [UdevDevice].
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Retrieve the list of tags attached to the udev device. The next
+    /// list entry can be retrieved with udev_list_entry_get_next(),
+    /// which returns `None` if no more entries exist. The tag string
+    /// can be retrieved from the list entry by udev_list_entry_get_name().
+    /// ```
+    ///
+    /// Returns: the first entry of the tag list
+    pub fn get_tags_list_entry(&mut self) -> Option<&UdevEntry> {
+        if !self.info_loaded {
+            self.read_db().ok();
+        }
+        self.tags_list_entry()
+    }
+
+    /// Gets the current tags list entry in the [UdevDevice].
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Retrieve the list of tags attached to the udev device. The next
+    /// list entry can be retrieved with udev_list_entry_get_next(),
+    /// which returns `None` if no more entries exist. The tag string
+    /// can be retrieved from the list entry by udev_list_entry_get_name().
+    /// ```
+    ///
+    /// Returns: the current entry of the tag list
+    pub fn get_current_tags_list_entry(&mut self) -> Option<&UdevEntry> {
+        if !self.info_loaded {
+            self.read_db().ok();
+        }
+        self.tags_list.next_entry()
+    }
+
     /// Adds an [UdevEntry] to the tags list.
     pub fn add_tag(&mut self, tag: &str) -> Result<()> {
         Self::is_valid_tag(tag)?;
@@ -603,10 +1264,17 @@ impl UdevDevice {
         }
     }
 
-    /// Gets whether the [UdevDevice] has a matching `tag` entry.
-    pub fn has_tag(&self, tag: &str) -> bool {
-        // TODO: read from hardware db if data is not loaded
-        // FIXME: implement hwdb
+    /// Gets whether the [UdevDevice] has the provided `tag` associated.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Check if a given device has a certain tag associated.
+    /// ```
+    pub fn has_tag(&mut self, tag: &str) -> bool {
+        if !self.info_loaded {
+            self.read_db().ok();
+        }
         self.tags_list.entry_by_name(tag).is_some()
     }
 
@@ -642,6 +1310,34 @@ impl UdevDevice {
         self
     }
 
+    /// Gets the number of microseconds since the [UdevDevice] was initialized.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Return the number of microseconds passed since udev set up the
+    /// device for the first time.
+    ///
+    /// This is only implemented for devices with need to store properties
+    /// in the udev database. All other devices return 0 here.
+    /// ```
+    ///
+    /// Returns: the number of microseconds since the device was first seen.
+    pub fn get_usec_since_initialized(&mut self) -> u64 {
+        if !self.info_loaded {
+            self.read_db().ok();
+        }
+        if self.usec_initialized == 0 {
+            0
+        } else {
+            time::SystemTime::now()
+                .duration_since(time::UNIX_EPOCH)
+                .unwrap_or(time::Duration::from_micros(self.usec_initialized))
+                .as_micros()
+                .saturating_sub(self.usec_initialized as u128) as u64
+        }
+    }
+
     /// Gets the [UdevDevice] devlink priority.
     pub const fn devlink_priority(&self) -> i32 {
         self.devlink_priority
@@ -674,6 +1370,14 @@ impl UdevDevice {
         self
     }
 
+    /// Gets the device major/minor number.
+    pub fn get_devnum(&mut self) -> u64 {
+        if !self.info_loaded {
+            self.read_uevent_file().ok();
+        }
+        self.devnum
+    }
+
     /// Gets the [UdevDevice] ifindex.
     pub const fn ifindex(&self) -> i32 {
         self.ifindex
@@ -688,6 +1392,16 @@ impl UdevDevice {
     pub fn with_ifindex(mut self, ifindex: i32) -> Self {
         self.set_ifindex(ifindex);
         self
+    }
+
+    /// Gets the [UdevDevice] ifindex.
+    ///
+    /// If the information file is not loaded, reads and parses the file from disk.
+    pub fn get_ifindex(&mut self) -> i32 {
+        if !self.info_loaded {
+            self.read_uevent_file().ok();
+        }
+        self.ifindex
     }
 
     /// Gets the [UdevDevice] watch handle.
@@ -850,6 +1564,25 @@ impl UdevDevice {
         self
     }
 
+    /// Gets whether the [UdevDevice] is initialized.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Check if udev has already handled the device and has set up
+    /// device node permissions and context, or has renamed a network
+    /// device.
+    ///
+    /// This is only implemented for devices with a device node
+    /// or network interfaces. All other devices return 1 here.
+    /// ```
+    pub fn get_is_initialized(&mut self) -> bool {
+        if !self.info_loaded {
+            self.read_db().ok();
+        }
+        self.is_initialized
+    }
+
     /// Gets the [UdevDevice] sysattr list read.
     pub const fn sysattr_list_read(&self) -> bool {
         self.sysattr_list_read
@@ -866,6 +1599,53 @@ impl UdevDevice {
         self
     }
 
+    pub fn get_sysattr_list_read(&mut self) -> Result<usize> {
+        let mut num = 0usize;
+        if self.sysattr_list_read {
+            Ok(num)
+        } else {
+            let syspath = self.syspath().to_owned();
+
+            for dir_entry in fs::read_dir(syspath.as_str())
+                .map_err(|err| Error::UdevDevice(format!("unable to open device syspath: {err}")))?
+            {
+                let entry = match dir_entry {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+
+                let file_type = entry.file_type().map_err(|err| {
+                    Error::UdevDevice(format!("unable to get syspath entry file type: {err}"))
+                })?;
+
+                if !file_type.is_symlink() && !file_type.is_file() {
+                    continue;
+                }
+
+                let name = match entry.file_name().into_string() {
+                    Ok(n) => n,
+                    Err(_) => continue,
+                };
+
+                let path = format!("{}/{name}", syspath);
+                let metadata = match fs::metadata(path.as_str()) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                if metadata.st_mode() & libc::S_IRUSR != 0 {
+                    continue;
+                }
+
+                self.sysattr_list.add_entry(name.as_str(), "");
+                num = num.saturating_add(1);
+            }
+
+            self.sysattr_list_read = true;
+
+            Ok(num)
+        }
+    }
+
     /// Gets the [UdevDevice] database persist.
     pub const fn db_persist(&self) -> bool {
         self.db_persist
@@ -880,6 +1660,71 @@ impl UdevDevice {
     pub fn with_db_persist(mut self, db_persist: bool) -> Self {
         self.set_db_persist(db_persist);
         self
+    }
+
+    /// Reads [UdevDevice] information from the persistent database file.
+    ///
+    /// Returns: `Ok(())` on success, `Err(Error)` otherwise
+    pub fn read_db(&mut self) -> Result<()> {
+        let id = self.get_id_filename().to_owned();
+        if self.db_loaded() {
+            Ok(())
+        } else if id.is_empty() {
+            Err(Error::UdevDevice("unable to retrieve ID filename".into()))
+        } else {
+            let filename = format!("/udev/data/{id}");
+            let file = fs::File::open(filename.as_str()).map_err(|err| {
+                Error::UdevDevice(format!("unable to open DB file: {filename}, error: {err}"))
+            })?;
+
+            // devices with a database entry are initialized
+            self.is_initialized = true;
+
+            let mut line = String::with_capacity(util::LINE_SIZE);
+            let mut reader = io::BufReader::new(file);
+
+            while let Ok(len) = reader.read_line(&mut line) {
+                if len < 4 {
+                    break;
+                }
+                let val = &line[2..];
+                match val.chars().next() {
+                    Some('S') => {
+                        self.add_devlink(format!("/dev/{val}").as_str());
+                        break;
+                    }
+                    Some('L') => {
+                        self.set_devlink_priority(val.parse::<i32>().unwrap_or(0));
+                        break;
+                    }
+                    Some('E') => {
+                        if self.add_property_from_string(val).is_some() {
+                            if let Some(entry) = self.properties_list.list_mut().back_mut() {
+                                entry.set_num(1);
+                            }
+                        }
+                        break;
+                    }
+                    Some('G') => {
+                        self.add_tag(val)?;
+                        break;
+                    }
+                    Some('W') => {
+                        self.set_watch_handle(val.parse::<i32>().unwrap_or(0));
+                        break;
+                    }
+                    Some('I') => {
+                        self.set_usec_initialized(val.parse::<u64>().unwrap_or(0));
+                        break;
+                    }
+                    _ => (),
+                }
+            }
+
+            log::trace!("device {self} filled with DB file data");
+
+            Ok(())
+        }
     }
 
     /// Reads properties from the `uevent` file.
@@ -1041,6 +1886,36 @@ impl UdevDevice {
 impl Default for UdevDevice {
     fn default() -> Self {
         Self::new(Arc::new(Udev::new()))
+    }
+}
+
+impl fmt::Display for UdevDevice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{")?;
+        write!(f, r#""syspath": {},"#, self.syspath)?;
+        write!(f, r#""devpath": {},"#, self.devpath)?;
+        write!(f, r#""sysname": {},"#, self.sysname)?;
+        write!(f, r#""sysnum": {},"#, self.sysnum)?;
+        write!(f, r#""devnode": {},"#, self.devnode)?;
+        write!(f, r#""devnode_mode": {},"#, self.devnode_mode)?;
+        write!(f, r#""devnode_uid": {},"#, self.devnode_uid)?;
+        write!(f, r#""devnode_gid": {},"#, self.devnode_gid)?;
+        write!(f, r#""subsystem": {},"#, self.subsystem)?;
+        write!(f, r#""devtype": {},"#, self.devtype)?;
+        write!(f, r#""driver": {},"#, self.driver)?;
+        write!(f, r#""action": {},"#, self.action)?;
+        write!(f, r#""devpath_old": {},"#, self.devpath_old)?;
+        write!(f, r#""id_filename": {},"#, self.id_filename)?;
+        write!(f, r#""monitor_buf": {},"#, self.monitor_buf)?;
+        write!(f, r#""seqnum": {},"#, self.seqnum)?;
+        write!(f, r#""usec_initialized": {},"#, self.usec_initialized)?;
+        write!(f, r#""devlink_priority": {},"#, self.devlink_priority)?;
+        write!(f, r#""devnum": {},"#, self.devnum)?;
+        write!(f, r#""ifindex": {},"#, self.ifindex)?;
+        write!(f, r#""watch_handle": {},"#, self.watch_handle)?;
+        write!(f, r#""maj": {},"#, self.maj)?;
+        write!(f, r#""min": {}"#, self.min)?;
+        write!(f, "}}")
     }
 }
 

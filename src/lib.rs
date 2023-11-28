@@ -104,3 +104,435 @@ pub fn udev_list_entry_foreach_mut(
     }
     Ok(())
 }
+
+/// Creates a new [UdevDevice] from the provided [Udev] context.
+pub fn udev_device_new(udev: Arc<Udev>) -> UdevDevice {
+    UdevDevice::new(udev)
+}
+
+/// Gets a reference to the [Udev] context from an [UdevDevice].
+pub fn udev_device_get_udev(device: &UdevDevice) -> &Udev {
+    device.udev()
+}
+
+/// Gets a cloned reference to the [Udev] context from an [UdevDevice].
+pub fn udev_device_get_udev_cloned(device: &UdevDevice) -> Arc<Udev> {
+    device.udev_cloned()
+}
+
+/// Creates new [UdevDevice], and fills in information from the sys
+/// device and the udev database entry.
+///
+/// The `syspath` is the absolute path to the device, including the sys mount point.
+///
+/// The initial refcount is 1, and needs to be decremented to release the resources of the udev device.
+///
+/// Returns: a new [UdevDevice], or `Error`, if it does not exist
+pub fn udev_device_new_from_syspath(udev: Arc<Udev>, syspath: &str) -> Result<UdevDevice> {
+    UdevDevice::new_from_syspath(udev, syspath)
+}
+
+/// Creates new [UdevDevice].
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Fills in information from the `sys` device and the udev database entry.
+///
+/// The device is looked-up by its major/minor number and type. Character and block device
+/// numbers are not unique across the two types.
+/// ```
+///
+/// Parameters:
+///
+/// - `udev`: [Udev] library context
+/// - `type`: `char` or `block` device
+/// - `devnum`: device major/minor number
+///
+/// Returns: a new [UdevDevice], or `Err`, if it does not exist
+pub fn udev_device_new_from_devnum(
+    udev: Arc<Udev>,
+    devtype: &str,
+    devnum: libc::dev_t,
+) -> Result<UdevDevice> {
+    UdevDevice::new_from_devnum(udev, devtype, devnum)
+}
+
+/// Creates a new [UdevDevice] from the subsystem and sysname.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Fills in information from the sys device and the udev database entry.
+///
+/// The device is looked up by the subsystem and name string of the device, like "mem" / "zero", or "block" / "sda".
+/// ```
+///
+/// Parameters:
+///
+/// - `udev`: [Udev] library context
+/// - `subsystem`: the subsystem of the device
+/// - `sysname`: the name of the device
+///
+/// Returns: a new [UdevDevice], or `Err`, if it does not exist
+pub fn udev_device_new_from_subsystem_sysname(
+    udev: Arc<Udev>,
+    subsystem: &str,
+    sysname: &str,
+) -> Result<UdevDevice> {
+    UdevDevice::new_from_subsystem_sysname(udev, subsystem, sysname)
+}
+
+/// Create new [UdevDevice] from an ID string.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+///
+/// Fill in information from the sys device and the udev database entry.
+///
+/// The device is looked-up by a special string:
+///
+///   b8:2          - block device major:minor
+///   c128:1        - char device major:minor
+///   n3            - network device ifindex
+///   +sound:card29 - kernel driver core subsystem:device name
+/// ```
+///
+/// Parameters:
+///
+/// - `udev`: udev library context
+/// - `id`: text string identifying a kernel device
+///
+/// Returns: a new [UdevDevice], or `Err`, if it does not exist
+pub fn udev_device_new_from_device_id(udev: Arc<Udev>, id: &str) -> Result<UdevDevice> {
+    UdevDevice::new_from_device_id(udev, id)
+}
+
+/// Create new udev device from the environment information.
+///
+/// From the original `libudev` documnentation:
+///
+/// ```no_build,no_run
+/// Fills in information from the current process environment.
+/// This only works reliable if the process is called from a udev rule.
+/// It is usually used for tools executed from IMPORT= rules.
+/// ```
+///
+/// Parameters:
+///
+/// - `udev`: [Udev] library context
+///
+/// Returns: a new [UdevDevice], or `Err`, if it does not exist
+pub fn udev_device_new_from_environment(udev: Arc<Udev>) -> Result<UdevDevice> {
+    UdevDevice::new_from_environment(udev)
+}
+
+/// Gets the next parent [UdevDevice].
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Find the next parent device, and fill in information from the sys
+/// device and the udev database entry.
+///
+/// @udev_device: the device to start searching from
+///
+/// Returned device is not referenced. It is attached to the child
+/// device, and will be cleaned up when the child device is cleaned up.
+///
+/// It is not necessarily just the upper level directory, empty or not
+/// recognized sys directories are ignored.
+///
+/// It can be called as many times as needed, without caring about
+/// references.
+/// ```
+///
+/// Returns: a new [UdevDevice], or `Err`, if it no parent exists.
+pub fn udev_device_get_parent(dev: &mut UdevDevice) -> Result<Arc<UdevDevice>> {
+    dev.get_parent()
+}
+
+/// Gets the next parent [UdevDevice] based on `subsystem` and `devtype`.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Find the next parent device, with a matching subsystem and devtype
+/// value, and fill in information from the sys device and the udev
+/// database entry.
+///
+/// If devtype is #NULL, only subsystem is checked, and any devtype will
+/// match.
+///
+/// Returned device is not referenced. It is attached to the child
+/// device, and will be cleaned up when the child device is cleaned up.
+///
+/// It can be called as many times as needed, without caring about
+/// references.
+/// ```
+///
+/// Parameters:
+///
+/// - `udev_device`: udev device to start searching from
+/// - `subsystem`: the subsystem of the device
+/// - `devtype`: the type (DEVTYPE) of the device
+///
+/// Returns: a new [UdevDevice], or `Err` if no matching parent exists.
+pub fn udev_device_get_parent_with_subsystem_devtype(
+    dev: &mut UdevDevice,
+    subsystem: &str,
+    devtype: &str,
+) -> Result<Arc<UdevDevice>> {
+    dev.get_parent_with_subsystem_devtype(subsystem, devtype)
+}
+
+/// Reads [UdevDevice] information from the persistent database file.
+///
+/// Returns: `Ok(())` on success, `Err(Error)` otherwise
+pub fn udev_device_read_db(dev: &mut UdevDevice) -> Result<()> {
+    dev.read_db()
+}
+
+/// Gets the [UdevDevice] device path.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Retrieve the kernel devpath value of the udev device. The path
+/// does not contain the sys mount point, and starts with a '/'.
+/// ```
+pub fn udev_device_get_devpath(dev: &UdevDevice) -> &str {
+    dev.devpath()
+}
+
+/// Gets the [UdevDevice] `syspath`.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Retrieve the sys path of the udev device. The path is an
+/// absolute path and starts with the sys mount point.
+/// ```
+pub fn udev_device_get_syspath(dev: &UdevDevice) -> &str {
+    dev.syspath()
+}
+
+/// Gets the [UdevDevice] `sysname`.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Get the kernel device name in /sys.
+/// ```
+pub fn udev_device_get_sysname(dev: &UdevDevice) -> &str {
+    dev.sysname()
+}
+
+/// Gets the [UdevDevice] `sysnum`.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Get the instance number of the device.
+/// ```
+pub fn udev_device_get_sysnum(dev: &UdevDevice) -> &str {
+    dev.sysnum()
+}
+
+/// Gets the [UdevDevice] `devnode`.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Retrieve the device node file name belonging to the udev device.
+/// The path is an absolute path, and starts with the device directory.
+/// ```
+///
+/// Returns: the device node file name of the [UdevDevice], or an empty string if none exists.
+pub fn udev_device_get_devnode(dev: &mut UdevDevice) -> &str {
+    dev.get_devnode()
+}
+
+/// Gets whether the [UdevDevice] is initialized.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Check if udev has already handled the device and has set up
+/// device node permissions and context, or has renamed a network
+/// device.
+///
+/// This is only implemented for devices with a device node
+/// or network interfaces. All other devices return 1 here.
+/// ```
+pub fn udev_device_get_is_initialized(dev: &mut UdevDevice) -> bool {
+    dev.get_is_initialized()
+}
+
+/// Gets the list of device links for the [UdevDevice].
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Retrieve the list of device links pointing to the device file of
+/// the udev device. The next list entry can be retrieved with
+/// udev_list_entry_get_next(), which returns #NULL if no more entries exist.
+///
+/// The devlink path can be retrieved from the list entry by
+/// udev_list_entry_get_name(). The path is an absolute path, and starts with
+/// the device directory.
+/// ```
+///
+/// Returns: the first entry of the device node link list
+pub fn udev_device_get_devlinks_list_entry(dev: &mut UdevDevice) -> Option<&UdevEntry> {
+    dev.get_devlinks_list_entry()
+}
+
+/// Gets the first tags list entry in the [UdevDevice].
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Retrieve the list of tags attached to the udev device. The next
+/// list entry can be retrieved with udev_list_entry_get_next(),
+/// which returns `None` if no more entries exist. The tag string
+/// can be retrieved from the list entry by udev_list_entry_get_name().
+/// ```
+///
+/// Returns: the first entry of the tag list
+pub fn udev_device_get_tags_list_entry(dev: &mut UdevDevice) -> Option<&UdevEntry> {
+    dev.get_tags_list_entry()
+}
+
+/// Gets the current tags list entry in the [UdevDevice].
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Retrieve the list of tags attached to the udev device. The next
+/// list entry can be retrieved with udev_list_entry_get_next(),
+/// which returns `None` if no more entries exist. The tag string
+/// can be retrieved from the list entry by udev_list_entry_get_name().
+/// ```
+///
+/// Returns: the current entry of the tag list
+pub fn udev_device_get_current_tags_list_entry(dev: &mut UdevDevice) -> Option<&UdevEntry> {
+    dev.get_current_tags_list_entry()
+}
+
+/// Gets the first entry in the `sysattr` properties list.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Retrieve the list of available sysattrs, with value being empty;
+/// This just return all available sysfs attributes for a particular
+/// device without reading their values.
+/// ```
+///
+/// Returns: the first entry of the property list
+pub fn udev_device_get_sysattr_list_entry(dev: &mut UdevDevice) -> Option<&UdevEntry> {
+    dev.get_sysattr_list_entry()
+}
+
+/// Gets the value of a given property.
+pub fn udev_device_get_property_value<'d>(dev: &'d UdevDevice, key: &str) -> Option<&'d str> {
+    dev.get_property_value(key)
+}
+
+/// Gets the kernel driver name.
+///
+/// Returns: the kernel driver name, or `None`  if none is attached.
+pub fn udev_device_get_driver(dev: &mut UdevDevice) -> Option<&str> {
+    dev.get_driver()
+}
+
+/// Gets the device major/minor number.
+pub fn udev_device_get_devnum(dev: &mut UdevDevice) -> u64 {
+    dev.get_devnum()
+}
+
+/// Gets the device action.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// This is only valid if the device was received through a monitor. Devices read from
+/// sys do not have an action string. Usual actions are: add, remove, change, online,
+/// offline.
+/// ```
+///
+/// Returns the kernel action value, or `None` if there is no action value available.
+pub fn udev_device_get_action(dev: &UdevDevice) -> &str {
+    dev.action()
+}
+
+/// Gets the device event sequence number.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// This is only valid if the device was received through a monitor. Devices read from
+/// sys do not have a sequence number.
+/// ```
+///
+/// Returns the kernel event sequence number, or zero if none is available.
+pub const fn udev_device_get_seqnum(dev: &UdevDevice) -> u64 {
+    dev.seqnum()
+}
+
+/// Gets the number of microseconds since the [UdevDevice] was initialized.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Return the number of microseconds passed since udev set up the
+/// device for the first time.
+///
+/// This is only implemented for devices with need to store properties
+/// in the udev database. All other devices return 0 here.
+/// ```
+///
+/// Returns: the number of microseconds since the device was first seen.
+pub fn udev_device_get_usec_since_initialized(dev: &mut UdevDevice) -> u64 {
+    dev.get_usec_since_initialized()
+}
+
+/// Gets the sys attribute file value.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// The retrieved value is cached in the device. Repeated calls will return the same
+/// value and not open the attribute again.
+/// ```
+///
+/// Returns: the content of a sys attribute file, or `None` if there is no sys attribute value.
+pub fn udev_device_get_sysattr_value(dev: &mut UdevDevice, sysattr: &str) -> Option<String> {
+    dev.get_sysattr_value(sysattr)
+}
+
+/// Gets whether the [UdevDevice] has the provided `tag` associated.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Check if a given device has a certain tag associated.
+/// ```
+pub fn udev_device_has_tag(dev: &mut UdevDevice, tag: &str) -> bool {
+    dev.has_tag(tag)
+}
+
+/// Gets whether the [UdevDevice] has the provided current `tag` associated.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Check if a given device has a certain tag associated.
+/// ```
+///
+/// TODO: `eudev` does not database does not support current tags, implement in this library.
+pub fn udev_device_has_current_tag(dev: &mut UdevDevice, tag: &str) -> bool {
+    dev.has_tag(tag)
+}

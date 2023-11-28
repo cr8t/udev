@@ -1,3 +1,5 @@
+use std::fmt;
+
 /// Bitmask for [Mode].
 pub const MODE_MASK: u32 = 0b1111_1111_1111;
 
@@ -33,11 +35,52 @@ impl Mode {
     pub const fn create(val: u32) -> Self {
         Self(val & MODE_MASK)
     }
+
+    /// Gets whether bits in `oth` are set in `self`.
+    pub fn is_set(&self, oth: &Self) -> bool {
+        self.0 & oth.0 != 0
+    }
 }
 
 impl From<u32> for Mode {
     fn from(val: u32) -> Self {
         Self::create(val)
+    }
+}
+
+impl fmt::Display for Mode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{")?;
+
+        let (suid, sgid, svtxt) = (
+            self.is_set(&Self::SET_UID),
+            self.is_set(&Self::SET_GID),
+            self.is_set(&Self::SAVE_TXT),
+        );
+        write!(f, r#""set_bits": "SUID{suid} SGID{sgid} SAVE_TXT{svtxt}","#)?;
+
+        let (ur, uw, ux) = (
+            self.is_set(&Self::READ_USER),
+            self.is_set(&Self::WRITE_USER),
+            self.is_set(&Self::EXEC_USER),
+        );
+        write!(f, r#""user": "R{ur}W{uw}X{ux}","#)?;
+
+        let (gr, gw, gx) = (
+            self.is_set(&Self::READ_GROUP),
+            self.is_set(&Self::WRITE_GROUP),
+            self.is_set(&Self::EXEC_GROUP),
+        );
+        write!(f, r#""group: "R{gr}W{gw}X{gx}","#)?;
+
+        let (or, ow, ox) = (
+            self.is_set(&Self::READ_OTHER),
+            self.is_set(&Self::WRITE_OTHER),
+            self.is_set(&Self::EXEC_OTHER),
+        );
+        write!(f, r#""other: "R{or}W{ow}X{ox}""#)?;
+
+        write!(f, "}}")
     }
 }
 

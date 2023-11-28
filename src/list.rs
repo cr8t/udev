@@ -162,7 +162,10 @@ impl UdevList {
         if self.is_empty() {
             true
         } else {
-            self.iter().filter(|e| device.has_tag(e.name())).count() != 0
+            self.iter()
+                .filter(|e| device.tags_list().entry_by_name(e.name()).is_some())
+                .count()
+                != 0
         }
     }
 
