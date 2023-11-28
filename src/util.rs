@@ -2,6 +2,8 @@ use std::fs;
 
 use crate::{murmur_hash2, Error, Result, Udev};
 
+pub(crate) const LINE_SIZE: usize = 16384;
+
 impl Udev {
     pub(crate) fn get_sys_core_link_value(slink: &str, syspath: &str) -> Result<String> {
         let path = format!("{syspath}/{slink}");
@@ -34,4 +36,14 @@ pub fn string_bloom64(s: &str) -> u64 {
         | (1u64 << ((hash >> 6) & 63))
         | (1u64 << ((hash >> 12) & 63))
         | (1u64 << ((hash >> 18) & 63))
+}
+
+/// Gets the major part of the device number.
+pub fn major(dev: libc::dev_t) -> u16 {
+    (((dev >> 31 >> 1) & 0xfffff000) | ((dev >> 8) & 0x00000fff)) as u16
+}
+
+/// Gets the minor part of the device number.
+pub fn minor(dev: libc::dev_t) -> u16 {
+    (((dev >> 12) & 0xffffff00) | (dev & 0x000000ff)) as u16
 }
