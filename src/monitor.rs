@@ -12,6 +12,102 @@ pub const UDEV_MONITOR_MAGIC: u32 = 0xfeedcafe;
 // directory.
 /// Default filesystem path for the UDEV `run` directory.
 pub const UDEV_ROOT_RUN: &str = "/run";
+/// Maximum length of BPF socket filters.
+pub const BPF_FILTER_LEN: usize = 512;
+
+/// Collection of BPF socket filters for kernel events.
+#[repr(C)]
+pub struct BpfFilters<const N: usize>([libc::sock_filter; N]);
+
+impl<const N: usize> BpfFilters<N> {
+    /// Creates a new [BpfFilters].
+    pub const fn new() -> Self {
+        Self(
+            [libc::sock_filter {
+                code: 0,
+                jt: 0,
+                jf: 0,
+                k: 0,
+            }; N],
+        )
+    }
+
+    /// Gets a reference to the list of [`sock_filter`](libc::sock_filter)s.
+    pub fn filters(&self) -> &[libc::sock_filter] {
+        self.0.as_ref()
+    }
+
+    /// Sets the code and data in the BPF socket filter.
+    ///
+    /// Increments the filter index on success.
+    ///
+    /// Returns: `Err(Error)` if the index is out-of-bounds
+    pub fn bpf_stmt(&mut self, i: &mut usize, code: u16, data: u32) -> Result<()> {
+        let len = self.0.len();
+        if *i < len {
+            self.0[*i] = libc::sock_filter {
+                code,
+                k: data,
+                jt: 0,
+                jf: 0,
+            };
+            *i = i.saturating_add(1);
+            Ok(())
+        } else {
+            Err(Error::UdevMonitor(format!(
+                "invalid socket filter index: {i}, length: {len}"
+            )))
+        }
+    }
+
+    /// Sets all the fields in the BPF socket filter.
+    ///
+    /// Increments the filter index on success.
+    ///
+    /// Returns: `Err(Error)` if the index is out-of-bounds
+    pub fn bpf_jmp(&mut self, i: &mut usize, code: u16, data: u32, jt: u8, jf: u8) -> Result<()> {
+        let len = self.0.len();
+        if *i < len {
+            self.0[*i] = libc::sock_filter {
+                code,
+                k: data,
+                jt,
+                jf,
+            };
+            *i = i.saturating_add(1);
+            Ok(())
+        } else {
+            Err(Error::UdevMonitor(format!(
+                "invalid socket filter index: {i}, length: {len}"
+            )))
+        }
+    }
+
+    /// Gets the length of set socket filters in the [BpfFilters].
+    pub fn len(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|f| f.code != 0 || f.jt != 0 || f.jf != 0 || f.k != 0)
+            .count()
+    }
+
+    /// Gets whether the [BpfFilters] has any set socket filters.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Gets the [BpfFilters] as a [`sock_fprog`](libc::sock_fprog) FFI object.
+    ///
+    /// SAFETY: the resulting `sock_fprog` contains a mutable pointer that should not be accessed
+    /// directly. The result is meant to be passed to Linux API functions that require
+    /// `sock_fprog`.
+    pub fn as_sock_fprog(&mut self) -> libc::sock_fprog {
+        libc::sock_fprog {
+            len: self.len() as u16,
+            filter: self.0.as_mut_ptr(),
+        }
+    }
+}
 
 /// Handles device event sources.
 pub struct UdevMonitor {
@@ -26,6 +122,7 @@ pub struct UdevMonitor {
     filter_subsystem_list: UdevList,
     filter_tag_list: UdevList,
     bound: bool,
+    filter: BpfFilters<BPF_FILTER_LEN>,
 }
 
 impl UdevMonitor {
@@ -46,6 +143,7 @@ impl UdevMonitor {
             filter_subsystem_list,
             filter_tag_list,
             bound: false,
+            filter: BpfFilters::new(),
         })
     }
 
@@ -82,6 +180,7 @@ impl UdevMonitor {
         udev_monitor.set_snl_destination_group(UdevMonitorNetlinkGroup::Udev);
 
         if fd < 0 {
+            // SAFETY: all arguments are valid, and the return value is checked before use.
             udev_monitor.set_sock(unsafe {
                 libc::socket(
                     libc::PF_NETLINK,
@@ -117,6 +216,7 @@ impl UdevMonitor {
     ///
     /// From the `libudev` documentation:
     ///
+    /// ```no_build,no_run
     /// Create new udev monitor and connect to a specified event
     /// source. Valid sources identifiers are "udev" and "kernel".
     ///
@@ -128,6 +228,7 @@ impl UdevMonitor {
     /// are sent out after `udev` has finished its event processing,
     /// all rules have been processed, and needed device nodes are
     /// created.
+    /// ```
     ///
     /// Returns: a new [UdevMonitor], or [Error], in case of an error
     pub fn new_from_netlink<N: Into<UdevMonitorNetlinkGroup> + fmt::Display + Copy>(
@@ -367,6 +468,272 @@ impl UdevMonitor {
         }
     }
 
+    /// Updates the monitor socket filter.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Update the installed socket filter. This is only needed,
+    /// if the filter was removed or changed.
+    /// ```
+    ///
+    /// Returns: `Ok(())` on success, `Err(Error)` otherwise.
+    pub fn filter_update(&mut self) -> Result<()> {
+        if self.filter_subsystem_list().entry().is_none()
+            && self.filter_tag_list().entry().is_none()
+        {
+            Ok(())
+        } else {
+            let mut ins: BpfFilters<BPF_FILTER_LEN> = BpfFilters::new();
+            let mut i = 0usize;
+
+            // load magic in A
+            ins.bpf_stmt(
+                &mut i,
+                (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+                UdevMonitorNetlinkHeader::magic_offset() as u32,
+            )?;
+            // jump if magic matches
+            ins.bpf_jmp(
+                &mut i,
+                (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+                UDEV_MONITOR_MAGIC,
+                1,
+                0,
+            )?;
+            // wrong magic, pass packet
+            ins.bpf_stmt(&mut i, (libc::BPF_RET | libc::BPF_K) as u16, 0xffff_ffff)?;
+
+            if self.filter_tag_list.entry().is_some() {
+                let mut tag_matches = self.filter_tag_list.len();
+
+                for list_entry in self.filter_tag_list.iter() {
+                    let tag_bloom_bits = util::string_bloom64(list_entry.name());
+                    let tag_bloom_hi = (tag_bloom_bits >> 32) as u32;
+                    let tag_bloom_lo = tag_bloom_bits as u32;
+
+                    // load device bloom bits in A
+                    ins.bpf_stmt(
+                        &mut i,
+                        (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+                        UdevMonitorNetlinkHeader::filter_tag_bloom_hi_offset() as u32,
+                    )?;
+                    // clear bits (tag bits & bloom bits)
+                    ins.bpf_stmt(
+                        &mut i,
+                        (libc::BPF_ALU | libc::BPF_AND | libc::BPF_K) as u16,
+                        UdevMonitorNetlinkHeader::filter_tag_bloom_hi_offset() as u32,
+                    )?;
+                    // jump to next tag if it does not match
+                    ins.bpf_jmp(
+                        &mut i,
+                        (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+                        tag_bloom_hi,
+                        0,
+                        3,
+                    )?;
+
+                    // load device bloom bits in A
+                    ins.bpf_stmt(
+                        &mut i,
+                        (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+                        UdevMonitorNetlinkHeader::filter_tag_bloom_lo_offset() as u32,
+                    )?;
+                    // clear bits (tag bits & bloom bits)
+                    ins.bpf_stmt(
+                        &mut i,
+                        (libc::BPF_ALU | libc::BPF_AND | libc::BPF_K) as u16,
+                        tag_bloom_lo,
+                    )?;
+                    // jump behind end of tag match block if tag matches
+                    tag_matches = tag_matches.saturating_sub(1);
+                    ins.bpf_jmp(
+                        &mut i,
+                        (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+                        tag_bloom_lo,
+                        1usize.saturating_add(tag_matches.saturating_mul(6)) as u8,
+                        0,
+                    )?;
+                }
+
+                // nothing matched, drop packet
+                ins.bpf_stmt(&mut i, (libc::BPF_RET | libc::BPF_K) as u16, 0)?;
+            }
+
+            // add all subsystem matches
+            if self.filter_subsystem_list().entry().is_some() {
+                for list_entry in self.filter_subsystem_list().iter() {
+                    let mut hash = util::string_hash32(list_entry.name());
+
+                    // load device subsystem value in A
+                    ins.bpf_stmt(
+                        &mut i,
+                        (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+                        UdevMonitorNetlinkHeader::filter_subsystem_hash_offset() as u32,
+                    )?;
+
+                    if list_entry.value().is_empty() {
+                        // jump if subsystem does not match
+                        ins.bpf_jmp(
+                            &mut i,
+                            (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+                            hash,
+                            0,
+                            1,
+                        )?;
+                    } else {
+                        // jump if subsystem does not match
+                        ins.bpf_jmp(
+                            &mut i,
+                            (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+                            hash,
+                            0,
+                            3,
+                        )?;
+
+                        // load device devtype value in A
+                        ins.bpf_stmt(
+                            &mut i,
+                            (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+                            UdevMonitorNetlinkHeader::filter_devtype_hash_offset() as u32,
+                        )?;
+
+                        // jump if value does not match
+                        hash = util::string_hash32(list_entry.value());
+                        ins.bpf_jmp(
+                            &mut i,
+                            (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+                            hash,
+                            0,
+                            1,
+                        )?;
+                    }
+
+                    // matched pass packet
+                    ins.bpf_stmt(&mut i, (libc::BPF_RET | libc::BPF_K) as u16, 0xffff_ffff)?;
+                }
+
+                // nothing matched, drop packet
+                ins.bpf_stmt(&mut i, (libc::BPF_RET | libc::BPF_K) as u16, 0)?;
+            }
+
+            // matched, pass packet
+            ins.bpf_stmt(&mut i, (libc::BPF_RET | libc::BPF_K) as u16, 0xffff_ffff)?;
+
+            // install filter
+            self.filter = ins;
+            let mut filter = self.filter.as_sock_fprog();
+
+            // SAFETY: arguments are valid, and pointer reference valid memory.
+            let err = unsafe {
+                libc::setsockopt(
+                    self.sock,
+                    libc::SOL_SOCKET,
+                    libc::SO_ATTACH_FILTER,
+                    &mut filter as *mut libc::sock_fprog as *mut _,
+                    mem::size_of::<libc::sock_fprog>() as u32,
+                )
+            };
+
+            if err < 0 {
+                let errno = io::Error::last_os_error();
+                Err(Error::UdevMonitor(format!(
+                    "error setting BPF filter, error: {err}, errno: {errno}"
+                )))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    /// Binds the [UdevMonitor] socket to the event source.
+    pub fn enable_receiving(&mut self) -> Result<()> {
+        self.filter_update()?;
+
+        let mut err = if !self.bound {
+            // SAFETY: all arguments are valid, and pointers reference valid memory.
+            unsafe {
+                libc::bind(
+                    self.sock,
+                    self.snl.as_nl_ptr()? as *const _,
+                    mem::size_of::<libc::sockaddr_nl>() as u32,
+                )
+            }
+        } else {
+            0
+        };
+
+        if err < 0 {
+            let errno = io::Error::last_os_error();
+            let err_msg = format!("bind failed, error: {err}, errno: {errno}");
+            log::error!("{err_msg}");
+            Err(Error::UdevMonitor(err_msg))
+        } else {
+            self.bound = true;
+            self.set_nl_address()?;
+
+            let on = 1i32;
+
+            // SAFETY: all arguments are valid, and pointers reference valid memory.
+            err = unsafe {
+                libc::setsockopt(
+                    self.sock,
+                    libc::SOL_SOCKET,
+                    libc::SO_PASSCRED,
+                    &on as *const i32 as *const _,
+                    mem::size_of::<i32>() as u32,
+                )
+            };
+
+            if err < 0 {
+                let errno = io::Error::last_os_error();
+                let err_msg = format!("setting SO_PASSCRED failed, error: {err}, errno: {errno}");
+                log::error!("{err_msg}");
+                Err(Error::UdevMonitor(err_msg))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    /// Sets the size of the kernel socket buffer.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Set the size of the kernel socket buffer. This call needs the
+    /// appropriate privileges to succeed.
+    /// ```
+    ///
+    /// Returns: `Ok(())` on success, `Err(Error)` otherwise.
+    pub fn set_receive_buffer_size(&mut self, size: usize) -> Result<()> {
+        let int_size = size as i32;
+        // SAFETY: all arguments are valid, and pointers reference valid memory.
+        let err = unsafe {
+            libc::setsockopt(
+                self.sock,
+                libc::SOL_SOCKET,
+                libc::SO_RCVBUFFORCE,
+                &int_size as *const i32 as *const _,
+                mem::size_of::<i32>() as u32,
+            )
+        };
+        if err < 0 {
+            let errno = io::Error::last_os_error();
+            let err_msg =
+                format!("Error setting receive buffer size, error: {err}, errno: {errno}");
+            log::error!("{err_msg}");
+            Err(Error::UdevMonitor(err_msg))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Receives data from the [UdevMonitor] socket.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
     /// Receive data from the udev monitor socket, allocate a new udev
     /// device, fill in the received data, and return the device.
     ///
@@ -376,9 +743,9 @@ impl UdevMonitor {
     /// the file descriptor returned by udev_monitor_get_fd() should to be used to
     /// wake up when new devices arrive, or alternatively the file descriptor
     /// switched into blocking mode.
+    /// ```
     ///
-    /// The initial refcount is 1, and needs to be decremented to
-    /// release the resources of the udev device.
+    /// Returns: `Ok(UdevDevice)` on success, `Err(Error)` otherwise.
     // FIXME: break this into smaller functions
     pub fn receive_device(&mut self) -> Result<UdevDevice> {
         // avoid infinite loop, only retry up to a given limit of queued devices
@@ -694,9 +1061,9 @@ impl UdevMonitor {
         }
     }
 
-    /// Removes all filters from monitor.
+    /// Removes all filters from the [UdevMonitor].
     ///
-    /// Returns `Ok` on success, `Err` otherwise.
+    /// Returns `Ok(())` on success, `Err(Error)` otherwise.
     pub fn filter_remove(&mut self) -> Result<()> {
         let mut filter = libc::sock_fprog {
             len: 0,
@@ -705,6 +1072,7 @@ impl UdevMonitor {
 
         self.filter_subsystem_list.clear();
 
+        // SAFETY: all arguments are valid, and pointers reference valid memory.
         let ret = unsafe {
             libc::setsockopt(
                 self.sock,
@@ -965,6 +1333,51 @@ impl UdevMonitorNetlinkHeader {
     pub fn with_filter_tag_bloom_lo(mut self, val: u32) -> Self {
         self.set_filter_tag_bloom_lo(val);
         self
+    }
+
+    /// `prefix` field offset.
+    pub const fn prefix_offset() -> usize {
+        0
+    }
+
+    /// `magic` field offset.
+    pub const fn magic_offset() -> usize {
+        8
+    }
+
+    /// `header_size` field offset.
+    pub const fn header_size_offset() -> usize {
+        12
+    }
+
+    /// `properties_off` field offset.
+    pub const fn properties_off_offset() -> usize {
+        16
+    }
+
+    /// `properties_len` field offset.
+    pub const fn properties_len_offset() -> usize {
+        20
+    }
+
+    /// `filter_subsystem_hash` field offset.
+    pub const fn filter_subsystem_hash_offset() -> usize {
+        24
+    }
+
+    /// `filter_devtype_hash` field offset.
+    pub const fn filter_devtype_hash_offset() -> usize {
+        28
+    }
+
+    /// `filter_tag_bloom_hi` field offset.
+    pub const fn filter_tag_bloom_hi_offset() -> usize {
+        32
+    }
+
+    /// `filter_tag_bloom_lo` field offset.
+    pub const fn filter_tag_bloom_lo_offset() -> usize {
+        36
     }
 }
 
