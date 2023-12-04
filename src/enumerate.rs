@@ -3,11 +3,15 @@
 //! Lookup devices in the `sys` filesystem, filter devices by properties,
 //! and return a sorted list of devices.
 //!
-//! From [`libudev-enumerate`](https://github.com/systemd/systemd/blob/869c1cf88fdb17681ec2cc274d04622f6f21e95c/src/libudev/libudev-enumerate.c) documentation.
+//! From [`libudev-enumerate`](https://github.com/eudev-project/eudev/blob/master/src/libudev/libudev-enumerate.c) documentation.
 
-use std::sync::Arc;
+use std::{fs, sync::Arc};
 
-use crate::{Udev, UdevDevice, UdevEntryList, UdevList};
+use crate::util;
+use crate::UDEV_ROOT_RUN;
+use crate::{Error, Result, Udev, UdevDevice, UdevEntry, UdevEntryList, UdevList};
+
+const LOG_PREFIX: &str = "udev enumerate:";
 
 /// Represents the file path in the `sys` filesystem.
 #[repr(C)]
@@ -119,6 +123,27 @@ impl UdevEnumerate {
         self
     }
 
+    /// Adds an entry to the match sysattr [UdevEntry] list.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Match only devices with a given /sys device attribute.
+    /// ```
+    ///
+    /// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+    pub fn add_match_sysattr(&mut self, sysattr: &str) -> Result<&UdevEntry> {
+        if sysattr.is_empty() {
+            Err(Error::UdevEnumerate("sysattr is null".into()))
+        } else {
+            self.sysattr_match_list
+                .add_entry(sysattr, "")
+                .ok_or(Error::UdevEnumerate(
+                    "unable to add match sysattr entry".into(),
+                ))
+        }
+    }
+
     /// Gets a reference to the sysattr nomatch list [UdevList].
     pub const fn sysattr_nomatch_list(&self) -> &UdevList {
         &self.sysattr_nomatch_list
@@ -138,6 +163,27 @@ impl UdevEnumerate {
     pub fn with_sysattr_nomatch_list<L: Into<UdevEntryList>>(mut self, list: L) -> Self {
         self.set_sysattr_nomatch_list(list);
         self
+    }
+
+    /// Adds an entry to the no-match sysattr [UdevEntry] list.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Match only devices without a given /sys device attribute.
+    /// ```
+    ///
+    /// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+    pub fn add_nomatch_sysattr(&mut self, sysattr: &str) -> Result<&UdevEntry> {
+        if sysattr.is_empty() {
+            Err(Error::UdevEnumerate("sysattr is null".into()))
+        } else {
+            self.sysattr_nomatch_list
+                .add_entry(sysattr, "")
+                .ok_or(Error::UdevEnumerate(
+                    "unable to add no-match sysattr entry".into(),
+                ))
+        }
     }
 
     /// Gets a reference to the subsystem match list [UdevList].
@@ -161,6 +207,27 @@ impl UdevEnumerate {
         self
     }
 
+    /// Adds an entry to the match subsystem [UdevEntry] list.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Match only devices belonging to a certain kernel subsystem.
+    /// ```
+    ///
+    /// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+    pub fn add_match_subsystem(&mut self, subsystem: &str) -> Result<&UdevEntry> {
+        if subsystem.is_empty() {
+            Err(Error::UdevEnumerate("subsystem is null".into()))
+        } else {
+            self.subsystem_match_list
+                .add_entry(subsystem, "")
+                .ok_or(Error::UdevEnumerate(
+                    "unable to add match subsystem entry".into(),
+                ))
+        }
+    }
+
     /// Gets a reference to the subsystem nomatch list [UdevList].
     pub const fn subsystem_nomatch_list(&self) -> &UdevList {
         &self.subsystem_nomatch_list
@@ -180,6 +247,27 @@ impl UdevEnumerate {
     pub fn with_subsystem_nomatch_list<L: Into<UdevEntryList>>(mut self, list: L) -> Self {
         self.set_subsystem_nomatch_list(list);
         self
+    }
+
+    /// Adds an entry to the no-match subsystem [UdevEntry] list.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Match only devices not belonging to a certain kernel subsystem.
+    /// ```
+    ///
+    /// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+    pub fn add_nomatch_subsystem(&mut self, subsystem: &str) -> Result<&UdevEntry> {
+        if subsystem.is_empty() {
+            Err(Error::UdevEnumerate("subsystem is null".into()))
+        } else {
+            self.subsystem_nomatch_list
+                .add_entry(subsystem, "")
+                .ok_or(Error::UdevEnumerate(
+                    "unable to add no-match subsystem entry".into(),
+                ))
+        }
     }
 
     /// Gets a reference to the sysname match list [UdevList].
@@ -203,6 +291,27 @@ impl UdevEnumerate {
         self
     }
 
+    /// Adds an entry to the match sysname [UdevEntry] list.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Match only devices with a given /sys device name.
+    /// ```
+    ///
+    /// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+    pub fn add_match_sysname(&mut self, sysname: &str) -> Result<&UdevEntry> {
+        if sysname.is_empty() {
+            Err(Error::UdevEnumerate("sysname is null".into()))
+        } else {
+            self.sysname_match_list
+                .add_entry(sysname, "")
+                .ok_or(Error::UdevEnumerate(
+                    "unable to add match sysname entry".into(),
+                ))
+        }
+    }
+
     /// Gets a reference to the properties match list [UdevList].
     pub const fn properties_match_list(&self) -> &UdevList {
         &self.properties_match_list
@@ -224,6 +333,27 @@ impl UdevEnumerate {
         self
     }
 
+    /// Adds an entry to the match properties [UdevEntry] list.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Match only devices with a certain property.
+    /// ```
+    ///
+    /// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+    pub fn add_match_property(&mut self, property: &str, value: &str) -> Result<&UdevEntry> {
+        if property.is_empty() {
+            Err(Error::UdevEnumerate("property is null".into()))
+        } else {
+            self.properties_match_list
+                .add_entry(property, value)
+                .ok_or(Error::UdevEnumerate(
+                    "unable to add match property entry".into(),
+                ))
+        }
+    }
+
     /// Gets a reference to the tags match list [UdevList].
     pub const fn tags_match_list(&self) -> &UdevList {
         &self.tags_match_list
@@ -243,6 +373,25 @@ impl UdevEnumerate {
     pub fn with_tags_match_list<L: Into<UdevEntryList>>(mut self, list: L) -> Self {
         self.set_tags_match_list(list);
         self
+    }
+
+    /// Adds an entry to the match tags [UdevEntry] list.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Match only devices with a certain tag.
+    /// ```
+    ///
+    /// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+    pub fn add_match_tag(&mut self, tag: &str) -> Result<&UdevEntry> {
+        if tag.is_empty() {
+            Err(Error::UdevEnumerate("tag is null".into()))
+        } else {
+            self.tags_match_list
+                .add_entry(tag, "")
+                .ok_or(Error::UdevEnumerate("unable to add match tag entry".into()))
+        }
     }
 
     /// Gets a reference to the devices list [UdevList].
@@ -376,6 +525,371 @@ impl UdevEnumerate {
     pub fn with_match_is_initialized(mut self, val: bool) -> Self {
         self.set_match_is_initialized(val);
         self
+    }
+
+    /// Adds a devices to the list of devices.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Add a device to the list of devices, to retrieve it back sorted in dependency order.
+    /// ```
+    ///
+    /// Returns: `Ok(())` on success, `Err(Error)` otherwise.
+    pub fn add_syspath(&mut self, syspath: &str) -> Result<()> {
+        if syspath.is_empty() {
+            Err(Error::UdevEnumerate("empty syspath".into()))
+        } else {
+            let dev = UdevDevice::new_from_syspath(Arc::clone(&self.udev), syspath)?;
+            self.syspath_add(dev.syspath())
+        }
+    }
+
+    fn syspath_add(&mut self, syspath: &str) -> Result<()> {
+        if self.devices_cur >= self.devices_max {
+            self.devices_max = self.devices_max.saturating_add(1024);
+            self.devices.reserve(1024);
+        }
+
+        self.devices.push(Syspath::new().with_syspath(syspath));
+
+        self.devices_cur = self.devices_cur.saturating_add(1);
+        self.devices_uptodate = false;
+
+        Ok(())
+    }
+
+    /// Scan `/sys` for devices which match the given filters.
+    ///
+    /// From the `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Scan /sys for all devices which match the given filters. No matches
+    /// will return all currently available devices.
+    /// ```
+    ///
+    /// Returns: `Ok(())` on success, `Err(Error)` otherwise.
+    pub fn scan_devices(&mut self) -> Result<()> {
+        if self.tags_match_list.entry().is_some() {
+            self.scan_devices_tags()
+        } else if self.parent.is_some() {
+            self.scan_devices_children()
+        } else {
+            self.scan_devices_all()
+        }
+    }
+
+    fn scan_devices_tags(&mut self) -> Result<()> {
+        // scan only tagged devices.
+        // use tags reverse-index, instead of searching all deivces in /sys
+        let mut add_syspaths: Vec<String> = Vec::new();
+
+        for list_entry in self.tags_match_list.iter() {
+            let tag_name = list_entry.name();
+            let path = format!("{UDEV_ROOT_RUN}/udev/tags/{tag_name}");
+
+            for dir_entry in fs::read_dir(path.as_str())
+                .map_err(|err| Error::UdevEnumerate(format!("unable to open tags path: {err}")))?
+                .filter(|e| e.is_ok())
+            {
+                let d_name = dir_entry?
+                    .file_name()
+                    .into_string()
+                    .unwrap_or(String::new());
+                if d_name.is_empty() {
+                    log::trace!("{LOG_PREFIX} empty/invalid entry");
+                } else if d_name.starts_with('.') {
+                    log::trace!("{LOG_PREFIX} private entry");
+                } else {
+                    let mut dev =
+                        UdevDevice::new_from_device_id(Arc::clone(&self.udev), d_name.as_str())?;
+                    let dev_syspath = dev.syspath().to_owned();
+
+                    if !self.match_subsystem(dev.subsystem()) {
+                        log::trace!("{LOG_PREFIX} no subsystem match");
+                    } else if !self.match_sysname(dev.sysname()) {
+                        log::trace!("{LOG_PREFIX} no sysname match");
+                    } else if !self.match_parent(&dev) {
+                        log::trace!("{LOG_PREFIX} no parent match");
+                    } else if !self.match_property(&dev) {
+                        log::trace!("{LOG_PREFIX} no property match");
+                    } else if !self.match_sysattr(&mut dev) {
+                        log::trace!("{LOG_PREFIX} no sys attribute match");
+                    } else {
+                        add_syspaths.push(dev_syspath);
+                    }
+                }
+            }
+        }
+
+        for path in add_syspaths.iter() {
+            self.syspath_add(path)?;
+        }
+
+        Ok(())
+    }
+
+    fn match_subsystem(&self, subsystem: &str) -> bool {
+        !subsystem.is_empty()
+            && !self
+                .subsystem_nomatch_list
+                .iter()
+                .any(|f| f.name() == subsystem)
+            && (self.subsystem_match_list.is_empty()
+                || self
+                    .subsystem_match_list
+                    .iter()
+                    .any(|f| f.name() == subsystem))
+    }
+
+    fn match_sysname(&self, sysname: &str) -> bool {
+        !sysname.is_empty()
+            && (self.sysname_match_list.is_empty()
+                || self.sysname_match_list.iter().any(|f| f.name() == sysname))
+    }
+
+    fn match_parent(&self, dev: &UdevDevice) -> bool {
+        match self.parent.as_ref() {
+            Some(parent) => dev.devpath().starts_with(parent.devpath()),
+            None => true,
+        }
+    }
+
+    fn match_tag(&self, dev: &mut UdevDevice) -> bool {
+        // no match always matches
+        self.tags_match_list.is_empty() ||
+            // loop over matches
+            // if any tag is a mismatch, return false
+            self.tags_match_list.iter().filter(|f| !dev.has_tag(f.name())).count() == 0
+    }
+
+    fn match_property(&self, dev: &UdevDevice) -> bool {
+        if self.properties_match_list.is_empty() {
+            true
+        } else {
+            let mut ret = false;
+            for list_entry in self.properties_match_list.iter() {
+                let match_key = list_entry.name();
+                let match_value = list_entry.value();
+
+                for property_entry in dev.properties_list().iter() {
+                    let dev_key = property_entry.name();
+                    let dev_value = property_entry.value();
+
+                    if let Ok(key_pattern) = glob::Pattern::new(match_key) {
+                        if !key_pattern.matches(dev_key) {
+                            log::trace!(
+                                "no key match found, entry key: {match_key}, device key {dev_key}"
+                            );
+                        } else if match_value.is_empty() && dev_value.is_empty() {
+                            ret = true;
+                            break;
+                        } else if let Ok(val_pattern) = glob::Pattern::new(match_value) {
+                            if val_pattern.matches(dev_value) {
+                                ret = true;
+                                break;
+                            }
+                        } else {
+                            log::trace!("no value match found, entry value: {match_value}, device value: {dev_value}");
+                        }
+                    }
+                }
+
+                if ret {
+                    break;
+                }
+            }
+
+            ret
+        }
+    }
+
+    fn match_sysattr(&self, dev: &mut UdevDevice) -> bool {
+        !self
+            .sysattr_nomatch_list
+            .iter()
+            .any(|f| dev.match_sysattr_value(f.name(), f.value()))
+            && self
+                .sysattr_match_list
+                .iter()
+                .filter(|f| !dev.match_sysattr_value(f.name(), f.value()))
+                .count()
+                == 0
+            && self
+                .sysattr_match_list
+                .iter()
+                .any(|f| dev.match_sysattr_value(f.name(), f.value()))
+    }
+
+    fn scan_devices_children(&mut self) -> Result<()> {
+        Err(Error::UdevEnumerate("unimplemented".into()))
+    }
+
+    fn scan_devices_all(&mut self) -> Result<()> {
+        Err(Error::UdevEnumerate("unimplemented".into()))
+    }
+
+    /// Scans `/sys` for all kernel subsystems.
+    ///
+    /// From `libudev` documentation:
+    ///
+    /// ```no_build,no_run
+    /// Scan /sys for all kernel subsystems, including buses, classes, drivers.
+    /// ```
+    ///
+    /// Returns: `Ok(())` on success, `Err(Error)` otherwise.
+    pub fn scan_subsystems(&mut self) -> Result<()> {
+        // all kernel modules
+        if self.match_subsystem("module") {
+            self.scan_dir_and_add_devices("module", "", "")?;
+        }
+
+        let subsysdir = if fs::metadata("/sys/subsystem").is_ok() {
+            "subsystem"
+        } else {
+            "bus"
+        };
+
+        // all subsystems (only buses support coldplug)
+        if self.match_subsystem("subsystem") {
+            self.scan_dir_and_add_devices(subsysdir, "", "")?;
+        }
+
+        // all subsystem drivers
+        if self.match_subsystem("drivers") {
+            self.scan_dir(subsysdir, "drivers", "drivers")?;
+        }
+
+        Ok(())
+    }
+
+    fn scan_dir_and_add_devices(
+        &mut self,
+        basedir: &str,
+        subdir1: &str,
+        subdir2: &str,
+    ) -> Result<()> {
+        let path = if !subdir1.is_empty() && !subdir2.is_empty() {
+            format!("/sys/{basedir}/{subdir1}/{subdir2}")
+        } else if !subdir1.is_empty() {
+            format!("/sys/{basedir}/{subdir1}")
+        } else if !subdir2.is_empty() {
+            format!("/sys/{basedir}/{subdir2}")
+        } else {
+            format!("/sys/{basedir}")
+        };
+
+        let mut add_syspaths: Vec<String> = Vec::new();
+
+        for dir_entry in fs::read_dir(path.as_str())
+            .map_err(|err| Error::UdevEnumerate(format!("unable to open {path} path: {err}")))?
+        {
+            let d_name = dir_entry?
+                .file_name()
+                .into_string()
+                .unwrap_or(String::new());
+
+            if d_name.is_empty() {
+                log::trace!("{LOG_PREFIX} empty/invalid entry");
+            } else if d_name.starts_with('.') {
+                log::trace!("{LOG_PREFIX} private entry");
+            } else if !self.match_sysname(d_name.as_str()) {
+                log::trace!("{LOG_PREFIX} no /sys name match");
+            } else {
+                let syspath = format!("{path}/{d_name}");
+                if let Ok(mut dev) =
+                    UdevDevice::new_from_syspath(Arc::clone(&self.udev), syspath.as_str())
+                {
+                    if self.match_is_initialized {
+                        // From `libudev` documentation:
+                        //
+                        // ```
+                        // All devices with a device node or network interfaces
+                        // possibly need udev to adjust the device node permission
+                        // or context, or rename the interface before it can be
+                        // reliably used from other processes.
+                        //
+                        // For now, we can only check these types of devices, we
+                        // might not store a database, and have no way to find out
+                        // for all other types of devices.
+                        // ```
+                        if dev.get_is_initialized()
+                            && (util::major(dev.devnum()) > 0 || dev.get_ifindex() > 0)
+                        {
+                            break;
+                        }
+                    }
+                    let dev_syspath = dev.syspath().to_owned();
+                    if !self.match_parent(&dev) {
+                        log::trace!("{LOG_PREFIX} no parent match");
+                        break;
+                    } else if !self.match_tag(&mut dev) {
+                        log::trace!("{LOG_PREFIX} no tag match");
+                        break;
+                    } else if !self.match_property(&dev) {
+                        log::trace!("{LOG_PREFIX} no property match");
+                        break;
+                    } else if !self.match_sysattr(&mut dev) {
+                        log::trace!("{LOG_PREFIX} no /sys attribute match");
+                        break;
+                    } else {
+                        add_syspaths.push(dev_syspath);
+                    }
+                }
+            }
+        }
+
+        for syspath in add_syspaths.iter() {
+            self.add_syspath(syspath)?;
+        }
+
+        Ok(())
+    }
+
+    fn scan_dir(&mut self, basedir: &str, subdir: &str, subsystem: &str) -> Result<()> {
+        let path = format!("/sys/{basedir}");
+
+        for dir_entry in fs::read_dir(path.as_str())
+            .map_err(|err| Error::UdevEnumerate(format!("unable to open {path} path: {err}")))?
+        {
+            let d_name = dir_entry?
+                .file_name()
+                .into_string()
+                .unwrap_or(String::new());
+
+            if d_name.is_empty() {
+                log::trace!("{LOG_PREFIX} empty/invalid entry");
+            } else if d_name.starts_with('.') {
+                log::trace!("{LOG_PREFIX} private entry");
+            } else if !self.match_sysname(if subsystem.is_empty() {
+                d_name.as_str()
+            } else {
+                subsystem
+            }) {
+                log::trace!("{LOG_PREFIX} no /sys subsystem name match");
+            } else {
+                self.scan_dir_and_add_devices(basedir, d_name.as_str(), subdir)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl UdevDevice {
+    pub(crate) fn match_sysattr_value(&mut self, sysattr: &str, match_val: &str) -> bool {
+        match self.get_sysattr_value(sysattr) {
+            Some(val) => {
+                if match_val.is_empty() {
+                    true
+                } else if let Ok(pattern) = glob::Pattern::new(match_val) {
+                    pattern.matches(val.as_str())
+                } else {
+                    false
+                }
+            }
+            None => false,
+        }
     }
 }
 
