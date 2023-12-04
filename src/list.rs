@@ -53,11 +53,6 @@ impl UdevList {
         self.list.iter_mut()
     }
 
-    /// Gets whether the [UdevEntryList] is empty.
-    pub fn is_empty(&self) -> bool {
-        self.list.is_empty()
-    }
-
     /// Gets a reference to the [UdevEntryList].
     pub fn list(&self) -> &UdevEntryList {
         &self.list
@@ -77,6 +72,21 @@ impl UdevList {
     pub fn with_list<L: Into<UdevEntryList>>(mut self, list: L) -> Self {
         self.set_list(list);
         self
+    }
+
+    /// Gets the length of the [UdevEntry] list.
+    pub fn len(&self) -> usize {
+        self.list.len()
+    }
+
+    /// Gets whether the [UdevEntryList] is empty.
+    pub fn is_empty(&self) -> bool {
+        self.list.is_empty()
+    }
+
+    /// Clears the list of all entries.
+    pub fn clear(&mut self) {
+        self.list.clear();
     }
 
     /// Gets an optional reference to the first [UdevEntry] in the [UdevEntryList].
@@ -167,11 +177,6 @@ impl UdevList {
                 .count()
                 != 0
         }
-    }
-
-    /// Clears the list of all entries.
-    pub fn clear(&mut self) {
-        self.list.clear();
     }
 }
 

@@ -536,3 +536,150 @@ pub fn udev_device_has_tag(dev: &mut UdevDevice, tag: &str) -> bool {
 pub fn udev_device_has_current_tag(dev: &mut UdevDevice, tag: &str) -> bool {
     dev.has_tag(tag)
 }
+
+/// Creates a new [UdevMonitor] from the provided parameters.
+///
+/// Parameters:
+///
+/// `udev`: udev library context
+/// `name`: name of event source
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Create new udev monitor and connect to a specified event
+/// source. Valid sources identifiers are "udev" and "kernel".
+///
+/// Applications should usually not connect directly to the
+/// "kernel" events, because the devices might not be usable
+/// at that time, before `udev` has configured them, and created
+/// device nodes. Accessing devices at the same time as `udev`,
+/// might result in unpredictable behavior. The "`udev`" events
+/// are sent out after `udev` has finished its event processing,
+/// all rules have been processed, and needed device nodes are
+/// created.
+/// ```
+///
+/// Returns: a new [UdevMonitor], or [Error], in case of an error
+pub fn udev_monitor_new_from_netlink(udev: Arc<Udev>, name: &str) -> Result<Arc<UdevMonitor>> {
+    Ok(Arc::new(UdevMonitor::new_from_netlink(udev, name)?))
+}
+
+/// Gets the [Udev] context of the [UdevMonitor].
+pub fn udev_monitor_get_udev(monitor: &UdevMonitor) -> &Arc<Udev> {
+    monitor.udev()
+}
+
+/// Binds the [UdevMonitor] socket to the event source.
+pub fn udev_monitor_enable_receiving(monitor: &mut UdevMonitor) -> Result<()> {
+    monitor.enable_receiving()
+}
+
+/// Sets the size of the kernel socket buffer.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Set the size of the kernel socket buffer. This call needs the
+/// appropriate privileges to succeed.
+/// ```
+///
+/// Returns: `Ok(())` on success, `Err(Error)` otherwise.
+pub fn udev_monitor_set_receive_buffer_size(monitor: &mut UdevMonitor, size: usize) -> Result<()> {
+    monitor.set_receive_buffer_size(size)
+}
+
+/// Gets the [UdevMonitor] socket file descriptor.
+pub fn udev_monitor_get_fd(monitor: &UdevMonitor) -> i32 {
+    monitor.sock()
+}
+
+/// Receives data from the [UdevMonitor] socket.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Receive data from the udev monitor socket, allocate a new udev
+/// device, fill in the received data, and return the device.
+///
+/// Only socket connections with uid=0 are accepted.
+///
+/// The monitor socket is by default set to NONBLOCK. A variant of poll() on
+/// the file descriptor returned by udev_monitor_get_fd() should to be used to
+/// wake up when new devices arrive, or alternatively the file descriptor
+/// switched into blocking mode.
+/// ```
+///
+/// Returns: `Ok(UdevDevice)` on success, `Err(Error)` otherwise.
+pub fn udev_monitor_receive_device(monitor: &mut UdevMonitor) -> Result<UdevDevice> {
+    monitor.receive_device()
+}
+
+/// Adds an [UdevEntry] into the filter subsystem list.
+///
+/// From `libudev` documentation:
+///
+/// Parameters:
+///
+/// - `subsystem`: the subsystem value to match the incoming devices against
+///   - must be non-empty
+/// - `devtype`: the devtype value to match the incoming devices against
+///
+/// ```no_build,no_run
+/// This filter is efficiently executed inside the kernel, and libudev subscribers
+/// will usually not be woken up for devices which do not match.
+///
+/// The filter must be installed before the monitor is switched to listening mode.
+/// ```
+///
+/// Returns `Ok` on success, `Err` otherwise.
+pub fn udev_monitor_filter_add_match_subsystem_devtype<'m>(
+    monitor: &'m mut UdevMonitor,
+    subsystem: &str,
+    devtype: &str,
+) -> Result<&'m UdevEntry> {
+    monitor.filter_add_match_subsystem_devtype(subsystem, devtype)
+}
+
+/// Adds an [UdevEntry] into the filter tag list.
+///
+/// From `libudev` documentation:
+///
+/// - `tag`: the name of a tag
+///   - must be non-empty
+///
+/// ```no_build,no_run
+/// This filter is efficiently executed inside the kernel, and libudev subscribers
+/// will usually not be woken up for devices which do not match.
+///
+/// The filter must be installed before the monitor is switched to listening mode.
+/// ```
+///
+/// Returns `Ok` on success, `Err` otherwise.
+pub fn udev_monitor_filter_add_match_tag<'m>(
+    monitor: &'m mut UdevMonitor,
+    tag: &str,
+) -> Result<&'m UdevEntry> {
+    monitor.filter_add_match_tag(tag)
+}
+
+/// Updates the monitor socket filter.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Update the installed socket filter. This is only needed,
+/// if the filter was removed or changed.
+/// ```
+///
+/// Returns: `Ok(())` on success, `Err(Error)` otherwise.
+pub fn udev_monitor_filter_update(monitor: &mut UdevMonitor) -> Result<()> {
+    monitor.filter_update()
+}
+
+/// Removes all filters from the [UdevMonitor].
+///
+/// Returns `Ok(())` on success, `Err(Error)` otherwise.
+pub fn udev_monitor_filter_remove(monitor: &mut UdevMonitor) -> Result<()> {
+    monitor.filter_remove()
+}

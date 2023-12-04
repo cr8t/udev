@@ -38,4 +38,44 @@ impl UdevSocket {
 
         Self::Netlink(nl)
     }
+
+    /// Gets the [UdevSocket] as a reference to a [`sockaddr_nl`](libc::sockaddr_nl).
+    ///
+    /// Returns `Err(Error)` if not a [UdevSocket::Netlink] variant.
+    pub fn as_nl(&self) -> Result<&sockaddr_nl> {
+        match self {
+            Self::Netlink(nl) => Ok(nl),
+            _ => Err(Error::Udev("socket: expected sockaddr_nl".into())),
+        }
+    }
+
+    /// Gets the [UdevSocket] as a mutable reference to a [`sockaddr_nl`](libc::sockaddr_nl).
+    ///
+    /// Returns `Err(Error)` if not a [UdevSocket::Netlink] variant.
+    pub fn as_nl_mut(&mut self) -> Result<&mut sockaddr_nl> {
+        match self {
+            Self::Netlink(nl) => Ok(nl),
+            _ => Err(Error::Udev("socket: expected sockaddr_nl".into())),
+        }
+    }
+
+    /// Gets the [UdevSocket] as a const pointer to a [`sockaddr_nl`](libc::sockaddr_nl).
+    ///
+    /// Returns `Err(Error)` if not a [UdevSocket::Netlink] variant.
+    pub fn as_nl_ptr(&self) -> Result<*const sockaddr_nl> {
+        match self {
+            Self::Netlink(nl) => Ok(nl as *const _),
+            _ => Err(Error::Udev("socket: expected sockaddr_nl".into())),
+        }
+    }
+
+    /// Gets the [UdevSocket] as a const pointer to a [`sockaddr_nl`](libc::sockaddr_nl).
+    ///
+    /// Returns `Err(Error)` if not a [UdevSocket::Netlink] variant.
+    pub fn as_nl_ptr_mut(&mut self) -> Result<*mut sockaddr_nl> {
+        match self {
+            Self::Netlink(nl) => Ok(nl as *mut _),
+            _ => Err(Error::Udev("socket: expected sockaddr_nl".into())),
+        }
+    }
 }
