@@ -36,8 +36,8 @@ Currently, there is only a Rust public API. Work is still ongoing to expose rema
 - [x] [Udev] context
 - [x] [UdevList] device entry lists
 - [x] [UdevDevice] kernel devices
-- [ ] [UdevMonitor] device monitor service
-- [ ] [UdevEnumerate] device enumeration
+- [x] [UdevMonitor] device monitor service
+- [x] [UdevEnumerate] device enumeration
 - [ ] [UdevQueue] device queue
 - [ ] [UdevHwdb] device hardware database persistent storage
 - [ ] public C API via FFI

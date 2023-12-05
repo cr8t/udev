@@ -1,7 +1,9 @@
 use std::fmt;
 
+/// Convenience alias for the `udev` library `Result` type.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Error types for the `udev` library.
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
@@ -10,6 +12,7 @@ pub enum Error {
     UdevDevice(String),
     UdevHwdb(String),
     UdevMonitor(String),
+    UdevEnumerate(String),
     Io(String),
 }
 
@@ -45,6 +48,7 @@ impl fmt::Display for Error {
             Self::UdevDevice(err) => write!(f, "udev device: {err}"),
             Self::UdevHwdb(err) => write!(f, "udev hwdb: {err}"),
             Self::UdevMonitor(err) => write!(f, "udev monitor: {err}"),
+            Self::UdevEnumerate(err) => write!(f, "udev enumerate: {err}"),
             Self::Io(err) => write!(f, "I/O: {err}"),
         }
     }

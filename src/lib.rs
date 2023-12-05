@@ -683,3 +683,209 @@ pub fn udev_monitor_filter_update(monitor: &mut UdevMonitor) -> Result<()> {
 pub fn udev_monitor_filter_remove(monitor: &mut UdevMonitor) -> Result<()> {
     monitor.filter_remove()
 }
+
+/// Creates a new [UdevEnumerate].
+pub fn udev_enumerate_new(udev: Arc<Udev>) -> Arc<UdevEnumerate> {
+    Arc::new(UdevEnumerate::new(udev))
+}
+
+/// Adds an entry to the match subsystem [UdevEntry] list.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Match only devices belonging to a certain kernel subsystem.
+/// ```
+///
+/// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+pub fn udev_enumerate_add_match_subsystem<'e>(
+    enumerate: &'e mut UdevEnumerate,
+    subsystem: &str,
+) -> Result<&'e UdevEntry> {
+    enumerate.add_match_subsystem(subsystem)
+}
+
+/// Adds an entry to the no-match subsystem [UdevEntry] list.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Match only devices not belonging to a certain kernel subsystem.
+/// ```
+///
+/// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+pub fn udev_enumerate_add_nomatch_subsystem<'e>(
+    enumerate: &'e mut UdevEnumerate,
+    subsystem: &str,
+) -> Result<&'e UdevEntry> {
+    enumerate.add_nomatch_subsystem(subsystem)
+}
+
+/// Adds an entry to the match sysattr [UdevEntry] list.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Match only devices with a given /sys device attribute.
+/// ```
+///
+/// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+pub fn udev_enumerate_add_match_sysattr<'e>(
+    enumerate: &'e mut UdevEnumerate,
+    sysattr: &str,
+) -> Result<&'e UdevEntry> {
+    enumerate.add_match_sysattr(sysattr)
+}
+
+/// Adds an entry to the no-match sysattr [UdevEntry] list.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Match only devices without a given /sys device attribute.
+/// ```
+///
+/// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+pub fn udev_enumerate_add_nomatch_sysattr<'e>(
+    enumerate: &'e mut UdevEnumerate,
+    sysattr: &str,
+) -> Result<&'e UdevEntry> {
+    enumerate.add_nomatch_sysattr(sysattr)
+}
+
+/// Adds an entry to the match properties [UdevEntry] list.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Match only devices with a certain property.
+/// ```
+///
+/// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+pub fn udev_enumerate_add_match_property<'e>(
+    enumerate: &'e mut UdevEnumerate,
+    property: &str,
+    value: &str,
+) -> Result<&'e UdevEntry> {
+    enumerate.add_match_property(property, value)
+}
+
+/// Adds an entry to the match sysname [UdevEntry] list.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Match only devices with a given /sys device name.
+/// ```
+///
+/// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+pub fn udev_enumerate_add_match_sysname<'e>(
+    enumerate: &'e mut UdevEnumerate,
+    sysname: &str,
+) -> Result<&'e UdevEntry> {
+    enumerate.add_match_sysname(sysname)
+}
+
+/// Adds an entry to the match tag [UdevEntry] list.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Match only devices with a certain tag.
+/// ```
+///
+/// Returns `Ok(UdevEntry)` on success, `Err(Error)` otherwise.
+pub fn udev_enumerate_add_match_tag<'e>(
+    enumerate: &'e mut UdevEnumerate,
+    tag: &str,
+) -> Result<&'e UdevEntry> {
+    enumerate.add_match_tag(tag)
+}
+
+/// Sets the parent [UdevDevice] on a given device tree.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Return the devices on the subtree of one given device. The parent
+/// itself is included in the list.
+///
+/// A reference for the device is held until the udev_enumerate context
+/// is cleaned up.
+/// ```
+///
+/// Returns: `Ok(())` on success, `Err(Error)` otherwise.
+pub fn udev_enumerate_add_match_parent(
+    enumerate: &mut UdevEnumerate,
+    dev: Arc<UdevDevice>,
+) -> Result<()> {
+    enumerate.set_parent(dev);
+    Ok(())
+}
+
+/// Sets whether the match lists are initialized.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Match only devices which udev has set up already. This makes
+/// sure, that the device node permissions and context are properly set
+/// and that network devices are fully renamed.
+///
+/// Usually, devices which are found in the kernel but not already
+/// handled by udev, have still pending events. Services should subscribe
+/// to monitor events and wait for these devices to become ready, instead
+/// of using uninitialized devices.
+///
+/// For now, this will not affect devices which do not have a device node
+/// and are not network interfaces.
+/// ```
+///
+/// Returns: `Ok(())` on success, `Err(Error)` otherwise.
+pub fn udev_enumerate_add_match_is_initialized(
+    enumerate: &mut UdevEnumerate,
+    val: bool,
+) -> Result<()> {
+    enumerate.set_match_is_initialized(val);
+    Ok(())
+}
+
+/// Adds a devices to the list of devices.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Add a device to the list of devices, to retrieve it back sorted in dependency order.
+/// ```
+///
+/// Returns: `Ok(())` on success, `Err(Error)` otherwise.
+pub fn udev_enumerate_add_syspath(enumerate: &mut UdevEnumerate, syspath: &str) -> Result<()> {
+    enumerate.add_syspath(syspath)
+}
+
+/// Scan `/sys` for devices which match the given filters.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Scan /sys for all devices which match the given filters. No matches
+/// will return all currently available devices.
+/// ```
+///
+/// Returns: `Ok(())` on success, `Err(Error)` otherwise.
+pub fn udev_enumerate_scan_devices(enumerate: &mut UdevEnumerate) -> Result<()> {
+    enumerate.scan_devices()
+}
+
+/// Scans `/sys` for all kernel subsystems.
+///
+/// From `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Scan /sys for all kernel subsystems, including buses, classes, drivers.
+/// ```
+///
+/// Returns: `Ok(())` on success, `Err(Error)` otherwise.
+pub fn udev_enumerate_scan_subsystems(enumerate: &mut UdevEnumerate) -> Result<()> {
+    enumerate.scan_subsystems()
+}
