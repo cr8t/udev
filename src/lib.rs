@@ -889,3 +889,40 @@ pub fn udev_enumerate_scan_devices(enumerate: &mut UdevEnumerate) -> Result<()> 
 pub fn udev_enumerate_scan_subsystems(enumerate: &mut UdevEnumerate) -> Result<()> {
     enumerate.scan_subsystems()
 }
+
+/// Creates a new [UdevQueue].
+pub fn udev_queue_new(udev: Arc<Udev>) -> Arc<UdevQueue> {
+    Arc::new(UdevQueue::new(udev))
+}
+
+/// Gets a reference to the [Udev] context.
+pub fn udev_queue_get_udev(queue: &UdevQueue) -> &Arc<Udev> {
+    queue.udev()
+}
+
+/// Checks if [Udev] is active on the system.
+pub fn udev_queue_get_udev_is_active(queue: &UdevQueue) -> bool {
+    queue.udev_is_active()
+}
+
+/// Gets whether [UdevQueue] is currently processing any events.
+pub fn udev_queue_get_queue_is_empty(queue: &UdevQueue) -> bool {
+    queue.queue_is_empty()
+}
+
+/// Gets a file descriptor to watch for a queue to become empty.
+pub fn udev_queue_get_fd(queue: &mut UdevQueue) -> Result<i32> {
+    queue.get_fd()
+}
+
+/// Clears the watched file descriptor for queue changes.
+///
+/// # Safety
+///
+/// Users must ensure that every [UdevQueue] has a unique file descriptor, if the descriptor is
+/// non-negative.
+///
+/// Returns: `Ok(())` on success, `Err(Error)` otherwise.
+pub fn udev_queue_flush(queue: &mut UdevQueue) -> Result<()> {
+    queue.flush()
+}
