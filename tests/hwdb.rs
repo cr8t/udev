@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use udev::{Result, Udev, UdevHwdb};
+use udevrs::{Result, Udev, UdevHwdb};
 
 mod common;
 
