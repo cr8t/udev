@@ -14,6 +14,7 @@ pub enum Error {
     UdevMonitor(String),
     UdevEnumerate(String),
     UdevQueue(String),
+    UdevUtil(String),
     Io(String),
 }
 
@@ -51,6 +52,7 @@ impl fmt::Display for Error {
             Self::UdevMonitor(err) => write!(f, "udev monitor: {err}"),
             Self::UdevEnumerate(err) => write!(f, "udev enumerate: {err}"),
             Self::UdevQueue(err) => write!(f, "udev queue: {err}"),
+            Self::UdevUtil(err) => write!(f, "udev util: {err}"),
             Self::Io(err) => write!(f, "I/O: {err}"),
         }
     }

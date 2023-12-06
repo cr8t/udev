@@ -963,3 +963,17 @@ pub fn udev_hwdb_get_properties_list_entry<'h>(
 ) -> Option<&'h UdevEntry> {
     hwdb.get_properties_list_entry(modalias, flags)
 }
+
+/// Encodes provided string, removing potentially unsafe characters.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Encode all potentially unsafe characters of a string to the
+/// corresponding 2 char hex value prefixed by '\x'.
+/// ```
+///
+/// Returns: `Ok(String)` on success, `Err(Error)` otherwise
+pub fn udev_util_encode_string(arg: &str) -> Result<String> {
+    util::encode_string(arg)
+}

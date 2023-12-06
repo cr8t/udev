@@ -4,6 +4,10 @@ use crate::{murmur_hash2, Error, Result, Udev};
 
 pub(crate) const LINE_SIZE: usize = 16384;
 
+mod device_nodes;
+
+pub use device_nodes::*;
+
 impl Udev {
     pub(crate) fn get_sys_core_link_value(slink: &str, syspath: &str) -> Result<String> {
         let path = format!("{syspath}/{slink}");
@@ -46,4 +50,18 @@ pub fn major(dev: libc::dev_t) -> u16 {
 /// Gets the minor part of the device number.
 pub fn minor(dev: libc::dev_t) -> u16 {
     (((dev >> 12) & 0xffffff00) | (dev & 0x000000ff)) as u16
+}
+
+/// Encodes provided string, removing potentially unsafe characters.
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Encode all potentially unsafe characters of a string to the
+/// corresponding 2 char hex value prefixed by '\x'.
+/// ```
+///
+/// Returns: `Ok(String)` on success, `Err(Error)` otherwise
+pub fn encode_string(arg: &str) -> Result<String> {
+    encode_devnode_name(arg)
 }
