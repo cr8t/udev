@@ -2,6 +2,12 @@
 name = "udev"
 version = "0.1.0"
 edition = "2021"
+authors = ["udev Rust Developers"]
+description = "Pure Rust implementation of the user-land udev library"
+keywords = ["udev", "devfs", "linux", "unix"]
+categories = ["filesystem", "os", "os::linux-apis", "os::unix-apis"]
+repository = "https://github.com/cr8t/udev"
+license = "MIT"
 
 [dependencies]
 bitflags = "2.4"
