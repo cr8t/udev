@@ -29,17 +29,19 @@ $ cargo doc --all --open
 
 As the project matures, use-case examples will be added to doc-tests.
 
+- [x] [Udev](src/context.rs) context
+- [x] [UdevList](src/list.rs) device entry lists
+- [x] [UdevDevice](src/device.rs) kernel devices
+- [x] [UdevMonitor](src/monitor.rs) device monitor service
+- [x] [UdevEnumerate](src/enumerate.rs) device enumeration
+- [x] [UdevQueue](src/queue.rs) device queue
+- [x] [UdevHwdb](src/hwdb.rs) device hardware database persistent storage
+- [x] [Top-level API](src/lib.rs) matches closely to original `libudev` API
+  - basis for a future C API via FFI
+
 ## WIP
 
 Currently, there is only a Rust public API. Work is still ongoing to expose remaining subsystems via the top-level API:
-
-- [x] [Udev] context
-- [x] [UdevList] device entry lists
-- [x] [UdevDevice] kernel devices
-- [x] [UdevMonitor] device monitor service
-- [x] [UdevEnumerate] device enumeration
-- [x] [UdevQueue] device queue
-- [x] [UdevHwdb] device hardware database persistent storage
 - [ ] public C API via FFI
   - after the Rust API stabilizes, work can start on a C API
   - some abstractions will take some work to expose safely through the FFI barrier, e.g. `Arc<Udev>`
