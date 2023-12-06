@@ -926,3 +926,40 @@ pub fn udev_queue_get_fd(queue: &mut UdevQueue) -> Result<i32> {
 pub fn udev_queue_flush(queue: &mut UdevQueue) -> Result<()> {
     queue.flush()
 }
+
+/// Creates a new [UdevHwdb].
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// Provides access to the static hardware properties database; the database to
+/// use can be overriden by setting the UDEV_HWDB_BIN environment
+/// variable to its file name.
+/// ```
+pub fn udev_hwdb_new(udev: Arc<Udev>) -> Result<Arc<UdevHwdb>> {
+    Ok(Arc::new(UdevHwdb::new(udev)?))
+}
+
+/// Looks up a matching device in the hardware database.
+///
+/// Parameters:
+///
+/// - `modalias`: modalias string
+/// - `flags`: (unused), preserved for easier mapping to `libudev` C API
+///
+/// From the `libudev` documentation:
+///
+/// ```no_build,no_run
+/// The lookup key is a `modalias` string, whose formats are defined for the Linux kernel modules.
+/// Examples are: pci:v00008086d00001C2D*, usb:v04F2pB221*. The first entry
+/// of a list of retrieved properties is returned.
+/// ```
+///
+/// Returns: an optional reference to an [UdevEntry].
+pub fn udev_hwdb_get_properties_list_entry<'h>(
+    hwdb: &'h mut UdevHwdb,
+    modalias: &str,
+    flags: u32,
+) -> Option<&'h UdevEntry> {
+    hwdb.get_properties_list_entry(modalias, flags)
+}

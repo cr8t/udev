@@ -120,14 +120,13 @@ impl UdevHwdb {
     /// From the `libudev` documentation:
     ///
     /// ```no_build,no_run
-    ///
     /// The lookup key is a `modalias` string, whose formats are defined for the Linux kernel modules.
     /// Examples are: pci:v00008086d00001C2D*, usb:v04F2pB221*. The first entry
     /// of a list of retrieved properties is returned.
     /// ```
     ///
     /// Returns: an optional reference to an [UdevEntry].
-    pub fn get_property_list_entry(&mut self, modalias: &str, _flags: u32) -> Option<&UdevEntry> {
+    pub fn get_properties_list_entry(&mut self, modalias: &str, _flags: u32) -> Option<&UdevEntry> {
         // For now, do the naive thing, and read the entire HWDB into memory (12M+!!!)
         //
         // Using the BufReader to jump around to all the various offsets will probably be
