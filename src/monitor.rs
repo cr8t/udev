@@ -1424,17 +1424,25 @@ impl TryFrom<&[u8]> for UdevMonitorNetlinkHeader {
 
             let filter_tag_bloom_lo = u32::from_ne_bytes(val[idx..idx + 4].try_into()?);
 
-            Ok(Self {
-                prefix,
-                magic,
-                header_size,
-                properties_off,
-                properties_len,
-                filter_subsystem_hash,
-                filter_devtype_hash,
-                filter_tag_bloom_hi,
-                filter_tag_bloom_lo,
-            })
+            if magic != UDEV_MONITOR_MAGIC {
+                let err_msg = format!(
+                    "UDEV magic bytes do not match, expected: {UDEV_MONITOR_MAGIC}, have: {magic}"
+                );
+                log::error!("{err_msg}");
+                Err(Error::UdevMonitor(err_msg))
+            } else {
+                Ok(Self {
+                    prefix,
+                    magic,
+                    header_size,
+                    properties_off,
+                    properties_len,
+                    filter_subsystem_hash,
+                    filter_devtype_hash,
+                    filter_tag_bloom_hi,
+                    filter_tag_bloom_lo,
+                })
+            }
         }
     }
 }
