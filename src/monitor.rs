@@ -134,7 +134,7 @@ impl UdevMonitor {
         Ok(Self {
             udev,
             sock: 0,
-            snl: UdevSocket::new_nl(libc::AF_NETLINK, 0, 0),
+            snl: UdevSocket::new_nl(libc::AF_NETLINK, 0, 2),
             snl_group: UdevMonitorNetlinkGroup::None,
             snl_trusted_sender: UdevSocket::new_nl(libc::AF_NETLINK, 0, 0),
             snl_destination: UdevSocket::new_nl(libc::AF_NETLINK, 0, 0),
