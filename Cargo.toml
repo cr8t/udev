@@ -7,7 +7,7 @@ description = "Pure Rust implementation of the user-land udev library"
 keywords = ["udev", "devfs", "linux", "unix"]
 categories = ["filesystem", "os", "os::linux-apis", "os::unix-apis"]
 repository = "https://github.com/cr8t/udev"
-license = "MIT"
+license = "LGPL-2.0-or-later"
 
 [dependencies]
 bitflags = "2.4"
