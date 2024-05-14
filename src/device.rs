@@ -1876,10 +1876,10 @@ impl UdevDevice {
         self.set_min(0);
 
         if self.devpath().is_empty() || self.subsystem().is_empty() {
-            Err(Error::Udev("device: empty devpath and/or subsystem".into()))
-        } else {
-            Ok(())
+            log::debug!("device: empty devpath and/or subsystem");
         }
+
+        Ok(())
     }
 }
 

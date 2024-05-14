@@ -1,13 +1,13 @@
 //! Connects to a device event source.
 
-use std::{fmt, fs, io, mem, sync::Arc};
+use std::{cmp, fmt, fs, io, mem, sync::Arc};
 
 use crate::{
     util, Error, Result, Udev, UdevDevice, UdevEntry, UdevEntryList, UdevList, UdevSocket,
 };
 
 /// UDEV Monitor magic bytes
-pub const UDEV_MONITOR_MAGIC: u32 = 0xfeedcafe;
+pub const UDEV_MONITOR_MAGIC: u32 = u32::from_le_bytes([0xfe, 0xed, 0xca, 0xfe]);
 // FIXME: put behind a feature flag or conditional compilation for platforms with a different run
 // directory.
 /// Default filesystem path for the UDEV `run` directory.
@@ -772,7 +772,7 @@ impl UdevMonitor {
             smsg.msg_iov = &mut iov as *mut libc::iovec as *mut _;
             smsg.msg_iovlen = 1;
             smsg.msg_control = cred_msg.as_mut_ptr() as *mut _;
-            smsg.msg_controllen = mem::size_of::<libc::ucred>();
+            smsg.msg_controllen = cred_msg.len();
             smsg.msg_name = &mut snl as *mut libc::sockaddr_nl as *mut _;
             smsg.msg_namelen = mem::size_of::<libc::sockaddr_nl>() as u32;
 
@@ -785,7 +785,7 @@ impl UdevMonitor {
                 let errno = io::Error::last_os_error();
                 let err_msg = format!("unable to receive message: {errno}");
 
-                log::error!("{err_msg}");
+                log::debug!("{err_msg}");
 
                 Err(Error::UdevMonitor(err_msg))
             } else if buflen < 32 || smsg.msg_flags & libc::MSG_TRUNC != 0 {
@@ -816,7 +816,7 @@ impl UdevMonitor {
                 pid: _,
                 uid,
                 gid: _,
-            } = parse_cmsg(cred_msg[..smsg.msg_controllen].as_ref())?;
+            } = parse_cmsg(cred_msg.as_ref())?;
 
             if uid != 0 {
                 let err_msg = format!("sender uid={uid}, message ignored");
@@ -828,33 +828,36 @@ impl UdevMonitor {
                 Ok(())
             }?;
 
-            let (bufpos, is_initialized) = if let Ok(nlh) =
-                UdevMonitorNetlinkHeader::try_from(buf.as_ref())
-            {
-                (nlh.properties_off as usize, true)
-            } else {
-                // kernel message header
-                let bufpos = buf
-                    .iter()
-                    .position(|&b| b == b'\0')
-                    .map(|b| b + 1)
-                    .unwrap_or(0);
+            let (bufpos, is_initialized) = match UdevMonitorNetlinkHeader::try_from(buf.as_ref()) {
+                Ok(nlh) => {
+                    let prop_off = nlh.properties_off as usize;
+                    log::debug!("NetlinkHeader properties offset: {prop_off:#x}");
+                    (cmp::min(buf.len(), prop_off), true)
+                }
+                Err(_) => {
+                    // kernel message header
+                    let bufpos = buf
+                        .iter()
+                        .position(|&b| b == b'\0')
+                        .map(|b| b + 1)
+                        .unwrap_or(0);
 
-                if bufpos < b"a@/d".len() || bufpos >= buflen as usize {
-                    let err_msg = format!("invalid message length :: buffer length: {buflen}, header length: {bufpos}, expected header: 4");
+                    if bufpos < b"a@/d".len() || bufpos >= buflen as usize {
+                        let err_msg = format!("invalid message length :: buffer length: {buflen}, header length: {bufpos}, expected header: 4");
 
-                    log::debug!("{err_msg}");
+                        log::debug!("{err_msg}");
 
-                    Err(Error::UdevMonitor(err_msg))
-                } else if buf[..2].as_ref() != b"@/".as_ref() {
-                    let err_msg = "unrecognized message header".to_owned();
+                        Err(Error::UdevMonitor(err_msg))
+                    } else if buf[..2].as_ref() != b"@/".as_ref() {
+                        let err_msg = "unrecognized message header".to_owned();
 
-                    log::debug!("{err_msg}");
+                        log::debug!("{err_msg}");
 
-                    Err(Error::UdevMonitor(err_msg))
-                } else {
-                    Ok((bufpos, false))
-                }?
+                        Err(Error::UdevMonitor(err_msg))
+                    } else {
+                        Ok((bufpos, false))
+                    }?
+                }
             };
 
             let mut udev_device =
@@ -1096,31 +1099,63 @@ impl UdevMonitor {
 
 fn parse_cmsg(msg_control: &[u8]) -> Result<libc::ucred> {
     let controllen = msg_control.len();
-    let msg_control_len = mem::size_of::<libc::cmsghdr>() + mem::size_of::<libc::ucred>();
+    let header_len = mem::size_of::<libc::cmsghdr>();
+    let ucred_len = mem::size_of::<libc::ucred>();
+    let msg_control_len = header_len + ucred_len;
 
-    if controllen >= msg_control_len {
-        let int_len = mem::size_of::<libc::c_int>();
-        let null_int = [0u8; 4];
+    let int_len = mem::size_of::<libc::c_int>();
+    let null_int = [0u8; 4];
 
-        // skip to the `cmsg_type` index of the `cmsghdr`
-        let mut idx = int_len * 3;
+    match controllen {
+        l if l >= msg_control_len => {
+            // skip to the `cmsg_type` index of the `cmsghdr`
+            let mut idx = int_len * 3;
 
-        let cmsg_type = libc::c_int::from_ne_bytes(
-            msg_control[idx..idx + int_len]
-                .as_ref()
-                .try_into()
-                .unwrap_or(null_int),
-        );
+            let cmsg_type = libc::c_int::from_ne_bytes(
+                msg_control[idx..idx + int_len]
+                    .as_ref()
+                    .try_into()
+                    .unwrap_or(null_int),
+            );
 
-        idx += int_len;
+            idx += int_len;
 
-        if cmsg_type != libc::SCM_CREDENTIALS {
-            let err_msg = "no sender credentials received, message ignored".to_owned();
+            if cmsg_type != libc::SCM_CREDENTIALS {
+                let err_msg = "no sender credentials received, message ignored".to_owned();
 
-            log::debug!("{err_msg}");
+                log::debug!("{err_msg}");
 
-            Err(Error::UdevMonitor(err_msg))
-        } else {
+                Err(Error::UdevMonitor(err_msg))
+            } else {
+                let pid = libc::pid_t::from_ne_bytes(
+                    msg_control[idx..idx + int_len]
+                        .as_ref()
+                        .try_into()
+                        .unwrap_or(null_int),
+                );
+                idx += int_len;
+
+                let uid = libc::uid_t::from_ne_bytes(
+                    msg_control[idx..idx + int_len]
+                        .as_ref()
+                        .try_into()
+                        .unwrap_or(null_int),
+                );
+                idx += int_len;
+
+                let gid = libc::gid_t::from_ne_bytes(
+                    msg_control[idx..idx + int_len]
+                        .as_ref()
+                        .try_into()
+                        .unwrap_or(null_int),
+                );
+
+                Ok(libc::ucred { pid, uid, gid })
+            }
+        }
+        l if l >= ucred_len => {
+            let mut idx = 0;
+
             let pid = libc::pid_t::from_ne_bytes(
                 msg_control[idx..idx + int_len]
                     .as_ref()
@@ -1146,10 +1181,9 @@ fn parse_cmsg(msg_control: &[u8]) -> Result<libc::ucred> {
 
             Ok(libc::ucred { pid, uid, gid })
         }
-    } else {
-        Err(Error::UdevMonitor(format!(
+        _ => Err(Error::UdevMonitor(format!(
             "msg_controllen ({controllen}) is too small for a cmsghdr"
-        )))
+        ))),
     }
 }
 
@@ -1401,32 +1435,32 @@ impl TryFrom<&[u8]> for UdevMonitorNetlinkHeader {
             let prefix: [u8; 8] = val[idx..idx + 8].try_into()?;
             idx += prefix.len();
 
-            let magic = u32::from_ne_bytes(val[idx..idx + 4].try_into()?);
+            let magic = u32::from_le_bytes(val[idx..idx + 4].try_into()?);
             idx += mem::size_of::<u32>();
 
-            let header_size = u32::from_ne_bytes(val[idx..idx + 4].try_into()?);
+            let header_size = u32::from_le_bytes(val[idx..idx + 4].try_into()?);
             idx += mem::size_of::<u32>();
 
-            let properties_off = u32::from_ne_bytes(val[idx..idx + 4].try_into()?);
+            let properties_off = u32::from_le_bytes(val[idx..idx + 4].try_into()?);
             idx += mem::size_of::<u32>();
 
-            let properties_len = u32::from_ne_bytes(val[idx..idx + 4].try_into()?);
+            let properties_len = u32::from_le_bytes(val[idx..idx + 4].try_into()?);
             idx += mem::size_of::<u32>();
 
-            let filter_subsystem_hash = u32::from_ne_bytes(val[idx..idx + 4].try_into()?);
+            let filter_subsystem_hash = u32::from_le_bytes(val[idx..idx + 4].try_into()?);
             idx += mem::size_of::<u32>();
 
-            let filter_devtype_hash = u32::from_ne_bytes(val[idx..idx + 4].try_into()?);
+            let filter_devtype_hash = u32::from_le_bytes(val[idx..idx + 4].try_into()?);
             idx += mem::size_of::<u32>();
 
-            let filter_tag_bloom_hi = u32::from_ne_bytes(val[idx..idx + 4].try_into()?);
+            let filter_tag_bloom_hi = u32::from_le_bytes(val[idx..idx + 4].try_into()?);
             idx += mem::size_of::<u32>();
 
-            let filter_tag_bloom_lo = u32::from_ne_bytes(val[idx..idx + 4].try_into()?);
+            let filter_tag_bloom_lo = u32::from_le_bytes(val[idx..idx + 4].try_into()?);
 
             if magic != UDEV_MONITOR_MAGIC {
                 let err_msg = format!(
-                    "UDEV magic bytes do not match, expected: {UDEV_MONITOR_MAGIC}, have: {magic}"
+                    "UDEV magic bytes do not match, expected: {UDEV_MONITOR_MAGIC:#x}, have: {magic:#x}"
                 );
                 log::error!("{err_msg}");
                 Err(Error::UdevMonitor(err_msg))
