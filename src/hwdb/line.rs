@@ -74,6 +74,7 @@ impl LineBuf {
     ) -> Result<()> {
         let prefix_off = entry.node().prefix_off() as usize;
         let prefix = trie_string(hwdb_buf, prefix_off);
+        let prefix_len = prefix.len();
 
         let (start, end) = if p < search.len() {
             // search for nul-terminator, or use the length of the string as terminator
@@ -89,7 +90,9 @@ impl LineBuf {
             (0, 0)
         };
 
-        self.add(&prefix[start..end])?;
+        if start <= prefix_len && end <= prefix_len && start <= end {
+            self.add(&prefix[start..end])?;
+        }
 
         for child in entry.children().iter() {
             self.add_char(child.c())?;
