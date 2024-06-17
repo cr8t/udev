@@ -23,7 +23,7 @@ pub fn trie_string(hwdb_buf: &[u8], offset: usize) -> &str {
             .iter()
             .position(|c| c == &b'\0' || c == &b'\n')
         {
-            end
+            offset + end
         } else {
             buf_len
         };
