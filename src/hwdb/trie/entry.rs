@@ -1,6 +1,6 @@
 use std::{cmp, mem};
 
-use crate::{Error, Result};
+use crate::{hwdb, Error, Result};
 
 use super::{TrieChildEntry, TrieNode, TrieValueEntry};
 
@@ -40,14 +40,8 @@ impl TrieEntry {
 
     /// Gets the total length of the [TrieEntry].
     pub fn len(&self) -> usize {
-        let children_len = self
-            .children
-            .len()
-            .saturating_mul(mem::size_of::<TrieChildEntry>());
-        let values_len = self
-            .values
-            .len()
-            .saturating_mul(mem::size_of::<TrieValueEntry>());
+        let children_len = self.children.len().saturating_mul(hwdb::child_entry_size());
+        let values_len = self.values.len().saturating_mul(hwdb::value_entry_size());
 
         mem::size_of::<TrieNode>()
             .saturating_add(children_len)
@@ -93,12 +87,12 @@ impl TryFrom<&[u8]> for TrieEntry {
     fn try_from(val: &[u8]) -> Result<Self> {
         let node = TrieNode::try_from(val)?;
 
-        let mut idx = mem::size_of::<TrieNode>();
+        let mut idx = hwdb::node_size();
 
         let val_end = val.len();
-        let child_len = mem::size_of::<TrieChildEntry>();
+        let child_len = hwdb::child_entry_size();
         let child_count = node.children_count() as usize;
-        let child_end = idx.saturating_add(child_count.saturating_mul(child_len).saturating_sub(1));
+        let child_end = idx.saturating_add(child_count.saturating_mul(child_len));
 
         let mut children: Vec<TrieChildEntry> = Vec::with_capacity(child_count);
 
@@ -111,9 +105,9 @@ impl TryFrom<&[u8]> for TrieEntry {
 
         children.sort();
 
-        let value_len = mem::size_of::<TrieValueEntry>();
+        let value_len = hwdb::value_entry_size();
         let value_count = node.values_count() as usize;
-        let value_end = idx.saturating_add(value_count.saturating_mul(value_len).saturating_sub(1));
+        let value_end = idx.saturating_add(value_count.saturating_mul(value_len));
 
         let mut values: Vec<TrieValueEntry> = Vec::with_capacity(value_count);
 

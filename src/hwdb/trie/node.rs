@@ -1,6 +1,6 @@
 use std::mem;
 
-use crate::{Error, Result};
+use crate::{hwdb, Error, Result};
 
 /// Trie node in the hardware database.
 #[repr(C, packed(8))]
@@ -21,6 +21,16 @@ impl TrieNode {
             _padding: [0u8; 7],
             values_count: 0,
         }
+    }
+
+    /// Gets the length of the encoded [TrieNode].
+    pub fn len(&self) -> usize {
+        hwdb::node_size()
+    }
+
+    /// Gets whether the [TrieNode] is empty.
+    pub const fn is_empty(&self) -> bool {
+        self.children_count == 0 && self.values_count == 0
     }
 
     /// Gets the prefix of the lookup string, shared by all children.
@@ -90,14 +100,22 @@ impl TryFrom<&[u8]> for TrieNode {
             // skip past the children count + padding
             idx += 8;
 
-            let values_count = u64::from_le_bytes(val[idx..idx + 8].try_into()?);
+            let values_count = u64::from_le_bytes(
+                val.get(idx..idx + 8)
+                    .ok_or(Error::InvalidLen(val.len()))?
+                    .try_into()?,
+            );
 
-            Ok(Self {
-                prefix_off,
-                children_count,
-                _padding,
-                values_count,
-            })
+            if values_count > 64 {
+                Err(Error::InvalidLen(values_count as usize))
+            } else {
+                Ok(Self {
+                    prefix_off,
+                    children_count,
+                    _padding,
+                    values_count,
+                })
+            }
         }
     }
 }

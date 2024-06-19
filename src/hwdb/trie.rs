@@ -19,14 +19,12 @@ pub const HWDB_SIG_STR: &str = "KSLPHHRH";
 pub fn trie_string(hwdb_buf: &[u8], offset: usize) -> &str {
     let buf_len = hwdb_buf.len();
     if (0..buf_len).contains(&offset) {
-        let str_end = if let Some(end) = hwdb_buf[offset..]
+        let str_end = hwdb_buf[offset..]
             .iter()
             .position(|c| c == &b'\0' || c == &b'\n')
-        {
-            offset + end
-        } else {
-            buf_len
-        };
+            .map(|end| offset + end)
+            .unwrap_or(buf_len);
+
         std::str::from_utf8(&hwdb_buf[offset..str_end]).unwrap_or("")
     } else {
         ""

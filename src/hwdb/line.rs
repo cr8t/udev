@@ -76,13 +76,19 @@ impl LineBuf {
         let prefix = trie_string(hwdb_buf, prefix_off);
         let prefix_len = prefix.len();
 
+        log::trace!(
+            "Entering fnmatch, prefix: {prefix}, glob: {}, search: {search}",
+            self.get()
+        );
+
         let (start, end) = if p < search.len() {
             // search for nul-terminator, or use the length of the string as terminator
             (
                 p,
-                search[p..]
+                search
                     .as_bytes()
                     .iter()
+                    .skip(p)
                     .position(|c| c == &b'\0')
                     .unwrap_or(search.len()),
             )
@@ -110,6 +116,7 @@ impl LineBuf {
         }
 
         if glob::Pattern::new(self.get())?.matches(search) {
+            log::trace!("Found matching entry, entry: {entry:?}, search: {search}");
             for value in entry.values().iter() {
                 UdevHwdb::_add_property(
                     list,
