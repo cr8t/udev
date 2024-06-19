@@ -96,7 +96,7 @@ impl UdevHwdb {
             for path in bin_paths.split('\0') {
                 if let Ok(f) = fs::OpenOptions::new().read(true).open(path) {
                     bin_file = Some(f);
-                    hwdb_path = path.to_owned();
+                    path.clone_into(&mut hwdb_path);
                     break;
                 }
                 let errno = io::Error::last_os_error();

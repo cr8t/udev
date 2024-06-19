@@ -81,6 +81,12 @@ impl TrieEntry {
     }
 }
 
+impl Default for TrieEntry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TryFrom<&[u8]> for TrieEntry {
     type Error = Error;
 

@@ -2,9 +2,9 @@ use crate::{Error, Result};
 
 /// Gets whether the provided character is whitelisted.
 pub fn whitelisted_char_for_devnode(c: char, white: &str) -> bool {
-    ('0'..='9').contains(&c)
-        || ('A'..='Z').contains(&c)
-        || ('a'..='z').contains(&c)
+    c.is_ascii_digit()
+        || c.is_ascii_uppercase()
+        || c.is_ascii_lowercase()
         || "#+-.:=@_".contains(|s| s == c)
         || white.contains(|s| s == c)
 }

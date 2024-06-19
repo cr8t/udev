@@ -108,6 +108,11 @@ impl<const N: usize> BpfFilters<N> {
         }
     }
 }
+impl<const N: usize> Default for BpfFilters<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Handles device event sources.
 pub struct UdevMonitor {

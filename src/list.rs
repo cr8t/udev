@@ -9,7 +9,7 @@ use crate::{Udev, UdevDevice};
 /// Convenience alias for a [LinkedList] of [UdevEntry].
 pub type UdevEntryList = LinkedList<UdevEntry>;
 
-///
+/// Represents a list wrapper around a [UdevEntryList].
 #[repr(C)]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UdevList {
