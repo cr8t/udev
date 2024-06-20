@@ -220,6 +220,12 @@ impl UdevHwdb {
         self.properties_list.entry()
     }
 
+    /// Looks up a matching device modalias in the hardware database and returns the list of properties.
+    pub fn query(&mut self, modalias: &str) -> Option<&UdevList> {
+        self.get_properties_list_entry(modalias, 0)?;
+        Some(self.properties_list())
+    }
+
     /// Gets a reference to the [properties list](UdevList).
     pub const fn properties_list(&self) -> &UdevList {
         &self.properties_list
