@@ -1,6 +1,6 @@
-use std::{cmp, mem};
+use std::cmp;
 
-use crate::{Error, Result};
+use crate::{hwdb, Error, Result};
 
 /// Trie child entry in the hardware database.
 ///
@@ -21,6 +21,16 @@ impl TrieChildEntry {
             _padding: [0u8; 7],
             child_off: 0,
         }
+    }
+
+    /// Gets the length of the encoded [TrieChildEntry].
+    pub fn len(&self) -> usize {
+        hwdb::child_entry_size()
+    }
+
+    /// Gets whether the [TrieChildEntry] is empty.
+    pub const fn is_empty(&self) -> bool {
+        false
     }
 
     /// Gets the index of the child node.
@@ -60,9 +70,10 @@ impl TryFrom<&[u8]> for TrieChildEntry {
     type Error = Error;
 
     fn try_from(val: &[u8]) -> Result<Self> {
-        if val.len() < mem::size_of::<Self>() {
+        if val.len() < hwdb::child_entry_size() {
             Err(Error::InvalidLen(val.len()))
         } else {
+            // TODO: parse use get ranges and offsets
             let mut idx = 0usize;
 
             let c = val[idx];

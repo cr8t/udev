@@ -964,6 +964,32 @@ pub fn udev_hwdb_get_properties_list_entry<'h>(
     hwdb.get_properties_list_entry(modalias, flags)
 }
 
+/// Looks up a matching device modalias in the hardware database and returns the list of properties.
+pub fn udev_hwdb_query<'h>(hwdb: &'h mut UdevHwdb, modalias: &str) -> Option<&'h UdevList> {
+    // populate list if modalias is present and return
+    hwdb.query(modalias)
+}
+
+/// Looks up a specific matching property name (key) for device modalias
+///
+/// ```no_run
+/// use std::sync::Arc;
+/// use udevrs::{Udev, UdevHwdb};
+/// let udev = Arc::new(Udev::new());
+///
+/// let mut hwdb = UdevHwdb::new(udev).unwrap();
+/// let query = udevrs::udev_hwdb_query_one(&mut hwdb, "usb:v1D6Bp0001", "ID_VENDOR_FROM_DATABASE");
+/// assert_eq!(query, Some("Linux Foundation"));
+/// ```
+pub fn udev_hwdb_query_one<'h>(
+    hwdb: &'h mut UdevHwdb,
+    modalias: &str,
+    name: &str,
+) -> Option<&'h str> {
+    hwdb.query(modalias)
+        .and_then(|list| list.iter().find(|e| e.name() == name).map(|e| e.value()))
+}
+
 /// Encodes provided string, removing potentially unsafe characters.
 ///
 /// From the `libudev` documentation:

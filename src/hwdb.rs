@@ -1,9 +1,7 @@
-use std::{
-    env, fs,
-    io::{self, Read},
-    mem,
-    sync::Arc,
-};
+use std::io::{self, Read};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::{env, fs, mem};
 
 use crate::{Error, Result, Udev, UdevEntry, UdevList};
 
@@ -12,6 +10,37 @@ mod trie;
 
 pub use line::*;
 pub use trie::*;
+
+static NODE_SIZE: AtomicUsize = AtomicUsize::new(24);
+static CHILD_ENTRY_SIZE: AtomicUsize = AtomicUsize::new(16);
+static VALUE_ENTRY_SIZE: AtomicUsize = AtomicUsize::new(32);
+
+/// Gets the [Node](TrieNode) size loaded from the [TrieHeader].
+pub fn node_size() -> usize {
+    NODE_SIZE.load(Ordering::Relaxed)
+}
+
+pub(crate) fn set_node_size(val: usize) {
+    NODE_SIZE.store(val, Ordering::SeqCst);
+}
+
+/// Gets the [ChildEntry](TrieChildEntry) size loaded from the [TrieHeader].
+pub fn child_entry_size() -> usize {
+    CHILD_ENTRY_SIZE.load(Ordering::Relaxed)
+}
+
+pub(crate) fn set_child_entry_size(val: usize) {
+    CHILD_ENTRY_SIZE.store(val, Ordering::SeqCst);
+}
+
+/// Gets the [ValueEntry](TrieValueEntry) size loaded from the [TrieHeader].
+pub fn value_entry_size() -> usize {
+    VALUE_ENTRY_SIZE.load(Ordering::Relaxed)
+}
+
+pub(crate) fn set_value_entry_size(val: usize) {
+    VALUE_ENTRY_SIZE.store(val, Ordering::SeqCst);
+}
 
 #[cfg(target_os = "linux")]
 const UDEV_LIBEXEC_DIR: &str = "/usr/lib/udev";
@@ -67,7 +96,7 @@ impl UdevHwdb {
             for path in bin_paths.split('\0') {
                 if let Ok(f) = fs::OpenOptions::new().read(true).open(path) {
                     bin_file = Some(f);
-                    hwdb_path = path.to_owned();
+                    path.clone_into(&mut hwdb_path);
                     break;
                 }
                 let errno = io::Error::last_os_error();
@@ -94,10 +123,17 @@ impl UdevHwdb {
 
         let properties_list = UdevList::new(Arc::clone(&udev));
 
+        set_node_size(head.node_size() as usize);
+        set_child_entry_size(head.child_entry_size() as usize);
+        set_value_entry_size(head.value_entry_size() as usize);
+
         log::debug!("=== trie on-disk ===");
         log::debug!("tool version:           {}", head.tool_version());
         log::debug!("file size:         {:8} bytes", metadata.len());
         log::debug!("header size:       {:8} bytes", head.header_size());
+        log::debug!("node size:         {:8} bytes", head.node_size());
+        log::debug!("child size:        {:8} bytes", head.child_entry_size());
+        log::debug!("value size:        {:8} bytes", head.value_entry_size());
         log::debug!("strings:           {:8} bytes", head.strings_len());
         log::debug!("nodes:             {:8} bytes", head.nodes_len());
 
@@ -108,6 +144,11 @@ impl UdevHwdb {
             head,
             properties_list,
         })
+    }
+
+    /// Gets a reference to the [TrieHeader].
+    pub const fn header(&self) -> &TrieHeader {
+        &self.head
     }
 
     /// Looks up a matching device in the hardware database.
@@ -179,6 +220,17 @@ impl UdevHwdb {
         self.properties_list.entry()
     }
 
+    /// Looks up a matching device modalias in the hardware database and returns the list of properties.
+    pub fn query(&mut self, modalias: &str) -> Option<&UdevList> {
+        self.get_properties_list_entry(modalias, 0)?;
+        Some(self.properties_list())
+    }
+
+    /// Gets a reference to the [properties list](UdevList).
+    pub const fn properties_list(&self) -> &UdevList {
+        &self.properties_list
+    }
+
     /// Adds a key-value pair to the property list.
     pub fn add_property(&mut self, key: &str, value: &str) -> Result<()> {
         Self::_add_property(&mut self.properties_list, key, value)
@@ -197,7 +249,10 @@ impl UdevHwdb {
     }
 
     /// Parses all [TrieEntry] nodes from an in-memory HWDB buffer.
-    pub fn parse_nodes(head: &TrieHeader, hwdb_buf: &[u8]) -> Result<Vec<TrieEntry>> {
+    pub fn parse_nodes<'a>(
+        head: &'a TrieHeader,
+        hwdb_buf: &'a [u8],
+    ) -> impl Iterator<Item = TrieEntry> + 'a {
         let nodes_len = head.nodes_len() as usize;
         let node_start = mem::size_of::<TrieHeader>();
         let node_end = node_start.saturating_add(nodes_len);
@@ -205,20 +260,25 @@ impl UdevHwdb {
         let buf_len = hwdb_buf.len();
 
         let mut idx = node_start;
-        // reserve an estimate of the `TrieEntry` list total size
-        let mut entries: Vec<TrieEntry> =
-            Vec::with_capacity(nodes_len.saturating_div(mem::size_of::<TrieNode>()));
 
-        if (0..buf_len).contains(&node_start) && (0..buf_len).contains(&node_end) {
-            while let Ok(entry) = TrieEntry::try_from(&hwdb_buf[idx..]) {
-                idx = idx.saturating_add(entry.len());
-                entries.push(entry);
+        std::iter::from_fn(move || {
+            if (0..buf_len).contains(&node_start)
+                && (0..buf_len).contains(&node_end)
+                && idx < nodes_len
+            {
+                TrieEntry::try_from(&hwdb_buf[idx..])
+                    .map(|entry| {
+                        idx = idx.saturating_add(entry.len());
+                        entry
+                    })
+                    .map_err(|err| {
+                        log::error!("Error parsing TrieEntry: {err}");
+                    })
+                    .ok()
+            } else {
+                None
             }
-        }
-
-        entries.reverse();
-
-        Ok(entries)
+        })
     }
 
     fn trie_search(
@@ -237,52 +297,60 @@ impl UdevHwdb {
             None
         };
 
+        log::trace!("Search term: {search}");
         let search_count = search.chars().count();
 
         while let Some(n) = node {
             let prefix_off = n.node().prefix_off() as usize;
             if prefix_off > 0 {
-                for (p, c) in trie_string(hwdb_buf, prefix_off).chars().enumerate() {
+                let ts = trie_string(hwdb_buf, prefix_off);
+                for (p, c) in ts.chars().enumerate() {
                     if c == '*' || c == '?' || c == '[' {
-                        return line_buf.trie_fnmatch(list, hwdb_buf, &n, p, search);
+                        return line_buf.trie_fnmatch(list, hwdb_buf, &n, p, &search[i + p..]);
                     }
-                    let i = i.saturating_add(p);
-                    if search_count > i && Some(c) != search.chars().nth(i) {
+                    if search_count > i && Some(c) != search.chars().nth(i + p) {
                         return Ok(());
                     }
                 }
+
+                i = i.saturating_add(ts.chars().count());
             }
 
             if let Some(child) = n.lookup_child(hwdb_buf, b'*') {
+                log::trace!("found matching child entry (glob): {child:?}");
                 line_buf.add_char(b'*')?;
                 line_buf.trie_fnmatch(list, hwdb_buf, &child, 0, &search[i..])?;
                 line_buf.remove_char();
             }
 
             if let Some(child) = n.lookup_child(hwdb_buf, b'?') {
+                log::trace!("found matching child entry (optional): {child:?}");
                 line_buf.add_char(b'?')?;
                 line_buf.trie_fnmatch(list, hwdb_buf, &child, 0, &search[i..])?;
                 line_buf.remove_char();
             }
 
             if let Some(child) = n.lookup_child(hwdb_buf, b'[') {
+                log::trace!("found matching child entry (range): {child:?}");
                 line_buf.add_char(b'[')?;
                 line_buf.trie_fnmatch(list, hwdb_buf, &child, 0, &search[i..])?;
                 line_buf.remove_char();
             }
 
-            if search.chars().nth(i) == Some('\0') {
+            if search.chars().nth(i) == Some('\0') || i >= search_count || i >= search.len() {
                 for value in n.values().iter() {
-                    Self::_add_property(
-                        list,
-                        trie_string(hwdb_buf, value.key_off() as usize),
-                        trie_string(hwdb_buf, value.value_off() as usize),
-                    )?;
+                    let key_str = trie_string(hwdb_buf, value.key_off() as usize);
+                    let val_str = trie_string(hwdb_buf, value.value_off() as usize);
+
+                    log::trace!("Matching property, key: {key_str}, value: {val_str}");
+
+                    Self::_add_property(list, key_str, val_str)?;
                 }
             }
 
             node = n.lookup_child(hwdb_buf, *search.as_bytes().get(i).unwrap_or(&0));
             i = i.saturating_add(1);
+            log::trace!("No match found, searching next child[{i}]: {node:?}");
         }
 
         Ok(())

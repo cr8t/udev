@@ -1,6 +1,6 @@
 use std::mem;
 
-use crate::{Error, Result};
+use crate::{hwdb, Error, Result};
 
 /// Trie value entry in the hardware database.
 ///
@@ -19,6 +19,16 @@ impl TrieValueEntry {
             key_off: 0,
             value_off: 0,
         }
+    }
+
+    /// Gets the length of the encoded [TrieValueEntry].
+    pub fn len(&self) -> usize {
+        hwdb::value_entry_size()
+    }
+
+    /// Gets whether the [TrieValueEntry] is empty.
+    pub const fn is_empty(&self) -> bool {
+        false
     }
 
     /// Gets key offset.
@@ -58,9 +68,10 @@ impl TryFrom<&[u8]> for TrieValueEntry {
     type Error = Error;
 
     fn try_from(val: &[u8]) -> Result<Self> {
-        if val.len() < mem::size_of::<Self>() {
+        if val.len() < hwdb::value_entry_size() {
             Err(Error::InvalidLen(val.len()))
         } else {
+            // TODO: parse use get ranges and offsets
             let mut idx = 0usize;
 
             let key_off = u64::from_le_bytes(val[idx..idx + 8].try_into()?);

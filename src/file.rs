@@ -39,6 +39,12 @@ impl file_handle {
     }
 }
 
+impl Default for file_handle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Wrapper around a syscall that returns an opaque handle that corresponds to a specified file.
 pub fn name_to_handle_at(
     dir_fd: i32,
