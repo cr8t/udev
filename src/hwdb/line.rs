@@ -1,6 +1,6 @@
-use heapless::Vec;
 use super::trie_string;
 use crate::{Error, Result, TrieEntry, UdevHwdb, UdevList};
+use heapless::Vec;
 
 /// Maximum length for a file line.
 pub const LINE_MAX: usize = 4096;
@@ -79,15 +79,15 @@ impl LineBuf {
             self.get()
         );
 
-        let (start, end) =
-            (
-                p,
-                prefix.as_bytes()
-                    .iter()
-                    .skip(p)
-                    .position(|c| *c == b'\0')
-                    .unwrap_or(prefix_len),
-            );
+        let (start, end) = (
+            p,
+            prefix
+                .as_bytes()
+                .iter()
+                .skip(p)
+                .position(|c| *c == b'\0')
+                .unwrap_or(prefix_len),
+        );
 
         // the logic of add only if within bounds but always remove is odd but the linebuf_add return is not checked in https://github.com/cr8t/udev/issues/25#L187
         // so behavior should match

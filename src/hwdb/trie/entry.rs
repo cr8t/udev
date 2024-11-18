@@ -66,7 +66,9 @@ impl TrieEntry {
         let buf_len = hwdb_buf.len();
 
         // assuming children are sorted (done in initialisation), perform a binary search instead like C hwdb
-        let child = self.children.binary_search_by(|child| child.cmp(&search))
+        let child = self
+            .children
+            .binary_search_by(|child| child.cmp(&search))
             .ok()
             .and_then(|idx| self.children.get(idx))?;
 
