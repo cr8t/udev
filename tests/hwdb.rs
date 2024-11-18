@@ -64,3 +64,23 @@ fn parse_hwdb() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn invalid_queries() -> Result<()> {
+    common::init();
+
+    std::env::set_var("UDEV_HWDB_BIN", "./hwdb.bin");
+    let udev = Arc::new(Udev::new());
+
+    let mut hwdb = UdevHwdb::new(udev)?;
+    let query = hwdb.query("");
+    assert!(query.is_none());
+
+    let query = hwdb.query("*x*");
+    assert!(query.is_none());
+
+    let query = hwdb.query("null:v1D6B");
+    assert!(query.is_none());
+
+    Ok(())
+}
