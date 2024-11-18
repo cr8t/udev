@@ -46,7 +46,15 @@ fn parse_hwdb() -> Result<()> {
 
     assert_eq!(hid, Some("Human Interface Device"));
 
-    // class, subclass and protocol
+    // specific class, subclass and protocol
+    let query = hwdb.query("usb:v*p*d*dc03dsc01dp01dp01").ok_or(Error::UdevHwdb("no matching entry found for usb:v*p*d*dc03*dsc01".into()))?;
+    let subclass = query.iter().find(|e| e.name() == "ID_USB_SUBCLASS_FROM_DATABASE").map(|e| (e.value()));
+    let protocol = query.iter().find(|e| e.name() == "ID_USB_PROTOCOL_FROM_DATABASE").map(|e| (e.value()));
+
+    assert_eq!(subclass, Some("Boot Interface Subclass"));
+    assert_eq!(protocol, Some("Keyboard"));
+
+    // class, subclass and protocol wildcard at end
     let at = hwdb.query("usb:v*p*d*dc02dsc02dp05*").ok_or(Error::UdevHwdb("no matching entry found for usb:v*p*d*dc02dsc02dp05*".into()))?
         .iter()
         .find(|e| e.name() == "ID_USB_PROTOCOL_FROM_DATABASE")
