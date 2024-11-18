@@ -1,4 +1,4 @@
-use std::{cmp, mem};
+use std::mem;
 
 use crate::{hwdb, Error, Result};
 
@@ -65,11 +65,11 @@ impl TrieEntry {
         let search = TrieChildEntry::new().with_c(c);
         let buf_len = hwdb_buf.len();
 
-        // search for a `TrieChildEntry` with the same child index
-        let child = self
-            .children
-            .iter()
-            .find(|&c| c.partial_cmp(&search) == Some(cmp::Ordering::Equal))?;
+        // assuming children are sorted (done in initialisation), perform a binary search instead like C hwdb
+        let child = self.children.binary_search_by(|child| child.cmp(&search))
+            .ok()
+            .and_then(|idx| self.children.get(idx))?;
+
         let child_off = child.child_off() as usize;
 
         // if the child offset is in range, attempt to construct a `TrieNode` at that offset

@@ -4,6 +4,7 @@ use udevrs::{udev_new, UdevHwdb};
 
 /// Simple program to query the systemd hwdb like `systemd-hwdb`
 fn main() {
+    env_logger::init();
     let args: Vec<String> = env::args().collect();
 
     if args.len() != 2 {
@@ -23,6 +24,7 @@ fn main() {
     };
 
     // Query the hwdb with the provided key
+    log::info!("Querying hwdb with key: {}", key);
     if let Some(properties) = hwdb.query(key) {
         properties
             .iter()

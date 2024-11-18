@@ -28,7 +28,7 @@ impl UdevList {
             list: LinkedList::new(),
             entries_cur: 0,
             entries_max: 0,
-            unique: false,
+            unique: true,
         }
     }
 
@@ -39,7 +39,7 @@ impl UdevList {
             list,
             entries_cur: 0,
             entries_max: 0,
-            unique: false,
+            unique: true,
         }
     }
 
@@ -125,15 +125,13 @@ impl UdevList {
     ///
     /// If `value` is empty, the entry value with be empty.
     pub fn add_entry(&mut self, name: &str, value: &str) -> Option<&UdevEntry> {
-        if self.unique() {
-            if self.entry_by_name(name).is_some() {
-                self.entry_by_name_mut(name).unwrap().set_value(value);
-            } else {
-                self.list
-                    .push_back(UdevEntry::new().with_name(name).with_value(value));
-            }
-            self.entry_by_name(name)
+        if self.unique() && self.entry_by_name(name).is_some() {
+            let existing = self.entry_by_name_mut(name).unwrap();
+            log::trace!("Updating property, {name}: {} => {value}", existing.value());
+            existing.set_value(value);
+            Some(existing)
         } else {
+            log::trace!("Adding property, {name}: {value}");
             self.list
                 .push_back(UdevEntry::new().with_name(name).with_value(value));
             self.list.back()

@@ -82,7 +82,7 @@ impl TryFrom<&[u8]> for TrieChildEntry {
             // skip `c` index + padding
             idx += 8;
 
-            let child_off = u64::from_le_bytes(val[idx..idx + 8].try_into()?);
+            let child_off = u64::from_le_bytes(val[idx..idx + std::mem::size_of::<u64>()].try_into()?);
 
             Ok(Self {
                 c,

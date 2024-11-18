@@ -25,8 +25,8 @@ pub fn trie_string(hwdb_buf: &[u8], offset: usize) -> &str {
             .map(|end| offset + end)
             .unwrap_or(buf_len);
 
-        std::str::from_utf8(&hwdb_buf[offset..str_end]).unwrap_or("")
+        std::str::from_utf8(&hwdb_buf[offset..str_end]).expect("invalid UTF-8 string")
     } else {
-        ""
+        panic!("invalid trie_string offset: {}", offset);
     }
 }
