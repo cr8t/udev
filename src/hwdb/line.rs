@@ -91,7 +91,7 @@ impl LineBuf {
 
         // the logic of add only if within bounds but always remove is odd but the linebuf_add return is not checked in https://github.com/cr8t/udev/issues/25#L187
         // so behavior should match
-        if start < prefix_len && end <= prefix_len {
+        if (start..=end).contains(&prefix_len) {
             self.add(&prefix[start..end])?;
         }
 
