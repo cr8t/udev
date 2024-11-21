@@ -71,7 +71,7 @@ impl LineBuf {
         search: &str,
     ) -> Result<()> {
         let prefix_off = entry.node().prefix_off() as usize;
-        let prefix = trie_string(hwdb_buf, prefix_off);
+        let prefix = trie_string(hwdb_buf, prefix_off)?;
         let prefix_len = prefix.len();
 
         log::trace!(
@@ -115,8 +115,8 @@ impl LineBuf {
             for value in entry.values().iter() {
                 UdevHwdb::_add_property(
                     list,
-                    trie_string(hwdb_buf, value.key_off() as usize),
-                    trie_string(hwdb_buf, value.value_off() as usize),
+                    trie_string(hwdb_buf, value.key_off() as usize)?,
+                    trie_string(hwdb_buf, value.value_off() as usize)?,
                 )?;
             }
         }

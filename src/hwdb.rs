@@ -303,7 +303,7 @@ impl UdevHwdb {
         while let Some(n) = node {
             if n.node().prefix_off() > 0 {
                 let prefix_off = n.node().prefix_off() as usize;
-                let ts = trie_string(hwdb_buf, prefix_off);
+                let ts = trie_string(hwdb_buf, prefix_off)?;
 
                 for (p, c) in ts.chars().enumerate() {
                     if c == '*' || c == '?' || c == '[' {
@@ -329,8 +329,8 @@ impl UdevHwdb {
 
             if search.chars().nth(i) == Some('\0') {
                 for value in n.values().iter() {
-                    let key_str = trie_string(hwdb_buf, value.key_off() as usize);
-                    let val_str = trie_string(hwdb_buf, value.value_off() as usize);
+                    let key_str = trie_string(hwdb_buf, value.key_off() as usize)?;
+                    let val_str = trie_string(hwdb_buf, value.value_off() as usize)?;
 
                     log::trace!("Matching property, key: {key_str}, value: {val_str}");
                     Self::_add_property(list, key_str, val_str)?;
