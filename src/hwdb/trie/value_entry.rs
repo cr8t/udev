@@ -73,11 +73,13 @@ impl TryFrom<&[u8]> for TrieValueEntry {
         } else {
             // TODO: parse use get ranges and offsets
             let mut idx = 0usize;
+            let mut idx_end = mem::size_of::<u64>();
 
-            let key_off = u64::from_le_bytes(val[idx..idx + 8].try_into()?);
-            idx += mem::size_of::<u64>();
+            let key_off = u64::from_le_bytes(val[idx..idx_end].try_into()?);
+            idx += idx_end;
+            idx_end += idx_end;
 
-            let value_off = u64::from_le_bytes(val[idx..idx + 8].try_into()?);
+            let value_off = u64::from_le_bytes(val[idx..idx_end].try_into()?);
 
             Ok(Self { key_off, value_off })
         }

@@ -238,6 +238,8 @@ impl UdevHwdb {
 
     pub(crate) fn _add_property(list: &mut UdevList, key: &str, value: &str) -> Result<()> {
         if let Some(nkey) = key.strip_prefix(' ') {
+            // TODO - should check priority if existing: https://github.com/systemd/systemd/blob/main/src/libsystemd/sd-hwdb/sd-hwdb.c#L134
+            // add_entry if UdevList.unique (default) will replace currently
             list.add_entry(nkey, value)
                 .map(|_| ())
                 .ok_or(Error::UdevHwdb("unable to add property".into()))
@@ -267,9 +269,8 @@ impl UdevHwdb {
                 && idx < nodes_len
             {
                 TrieEntry::try_from(&hwdb_buf[idx..])
-                    .map(|entry| {
+                    .inspect(|entry| {
                         idx = idx.saturating_add(entry.len());
-                        entry
                     })
                     .map_err(|err| {
                         log::error!("Error parsing TrieEntry: {err}");
@@ -298,17 +299,18 @@ impl UdevHwdb {
         };
 
         log::trace!("Search term: {search}");
-        let search_count = search.chars().count();
 
         while let Some(n) = node {
-            let prefix_off = n.node().prefix_off() as usize;
-            if prefix_off > 0 {
-                let ts = trie_string(hwdb_buf, prefix_off);
+            if n.node().prefix_off() > 0 {
+                let prefix_off = n.node().prefix_off() as usize;
+                let ts = trie_string(hwdb_buf, prefix_off)?;
+
                 for (p, c) in ts.chars().enumerate() {
                     if c == '*' || c == '?' || c == '[' {
                         return line_buf.trie_fnmatch(list, hwdb_buf, &n, p, &search[i + p..]);
                     }
-                    if search_count > i && Some(c) != search.chars().nth(i + p) {
+
+                    if search.chars().nth(i + p) != Some(c) {
                         return Ok(());
                     }
                 }
@@ -316,34 +318,21 @@ impl UdevHwdb {
                 i = i.saturating_add(ts.chars().count());
             }
 
-            if let Some(child) = n.lookup_child(hwdb_buf, b'*') {
-                log::trace!("found matching child entry (glob): {child:?}");
-                line_buf.add_char(b'*')?;
-                line_buf.trie_fnmatch(list, hwdb_buf, &child, 0, &search[i..])?;
-                line_buf.remove_char();
+            for wildcard in [b'*', b'?', b'['] {
+                if let Some(child) = n.lookup_child(hwdb_buf, wildcard) {
+                    line_buf.add_char(wildcard)?;
+                    log::trace!("wildcard ({wildcard:?}) child match: child: {child:?}");
+                    line_buf.trie_fnmatch(list, hwdb_buf, &child, 0, &search[i..])?;
+                    line_buf.remove_char();
+                }
             }
 
-            if let Some(child) = n.lookup_child(hwdb_buf, b'?') {
-                log::trace!("found matching child entry (optional): {child:?}");
-                line_buf.add_char(b'?')?;
-                line_buf.trie_fnmatch(list, hwdb_buf, &child, 0, &search[i..])?;
-                line_buf.remove_char();
-            }
-
-            if let Some(child) = n.lookup_child(hwdb_buf, b'[') {
-                log::trace!("found matching child entry (range): {child:?}");
-                line_buf.add_char(b'[')?;
-                line_buf.trie_fnmatch(list, hwdb_buf, &child, 0, &search[i..])?;
-                line_buf.remove_char();
-            }
-
-            if search.chars().nth(i) == Some('\0') || i >= search_count || i >= search.len() {
+            if search.chars().nth(i) == Some('\0') {
                 for value in n.values().iter() {
-                    let key_str = trie_string(hwdb_buf, value.key_off() as usize);
-                    let val_str = trie_string(hwdb_buf, value.value_off() as usize);
+                    let key_str = trie_string(hwdb_buf, value.key_off() as usize)?;
+                    let val_str = trie_string(hwdb_buf, value.value_off() as usize)?;
 
                     log::trace!("Matching property, key: {key_str}, value: {val_str}");
-
                     Self::_add_property(list, key_str, val_str)?;
                 }
             }

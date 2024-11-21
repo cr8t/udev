@@ -1,9 +1,6 @@
-use std::cmp;
-
-use heapless::Vec;
-
 use super::trie_string;
 use crate::{Error, Result, TrieEntry, UdevHwdb, UdevList};
+use heapless::Vec;
 
 /// Maximum length for a file line.
 pub const LINE_MAX: usize = 4096;
@@ -50,9 +47,10 @@ impl LineBuf {
     ///
     /// **NOTE**: clears the buffer if count is larger than the [LineBuf] length.
     pub fn remove(&mut self, count: usize) {
-        let len = cmp::min(count, self.bytes.len());
-        for _ in 0..len {
-            self.bytes.pop();
+        if count >= self.bytes.len() {
+            self.bytes.clear();
+        } else {
+            self.bytes.truncate(self.bytes.len() - count);
         }
     }
 
@@ -73,7 +71,7 @@ impl LineBuf {
         search: &str,
     ) -> Result<()> {
         let prefix_off = entry.node().prefix_off() as usize;
-        let prefix = trie_string(hwdb_buf, prefix_off);
+        let prefix = trie_string(hwdb_buf, prefix_off)?;
         let prefix_len = prefix.len();
 
         log::trace!(
@@ -81,29 +79,26 @@ impl LineBuf {
             self.get()
         );
 
-        let (start, end) = if p < search.len() {
-            // search for nul-terminator, or use the length of the string as terminator
-            (
-                p,
-                search
-                    .as_bytes()
-                    .iter()
-                    .skip(p)
-                    .position(|c| c == &b'\0')
-                    .unwrap_or(search.len()),
-            )
-        } else {
-            (0, 0)
-        };
+        let (start, end) = (
+            p,
+            prefix
+                .as_bytes()
+                .iter()
+                .skip(p)
+                .position(|c| *c == b'\0')
+                .unwrap_or(prefix_len),
+        );
 
-        if start <= prefix_len && end <= prefix_len && start <= end {
+        // the logic of add only if within bounds but always remove is odd but the linebuf_add return is not checked in https://github.com/cr8t/udev/issues/25#L187
+        // so behavior should match
+        if (start..=end).contains(&prefix_len) {
             self.add(&prefix[start..end])?;
         }
 
         for child in entry.children().iter() {
-            self.add_char(child.c())?;
             let child_off = child.child_off() as usize;
             if child_off < hwdb_buf.len() {
+                self.add_char(child.c())?;
                 self.trie_fnmatch(
                     list,
                     hwdb_buf,
@@ -120,8 +115,8 @@ impl LineBuf {
             for value in entry.values().iter() {
                 UdevHwdb::_add_property(
                     list,
-                    trie_string(hwdb_buf, value.key_off() as usize),
-                    trie_string(hwdb_buf, value.value_off() as usize),
+                    trie_string(hwdb_buf, value.key_off() as usize)?,
+                    trie_string(hwdb_buf, value.value_off() as usize)?,
                 )?;
             }
         }
