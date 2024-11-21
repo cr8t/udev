@@ -885,7 +885,10 @@ impl UdevMonitor {
                     events: libc::POLLIN,
                     revents: 0,
                 }];
+                #[cfg(target_pointer_width = "64")]
                 let pfd_len = pfd.len() as u64;
+                #[cfg(target_pointer_width = "32")]
+                let pfd_len = pfd.len() as u32;
 
                 // SAFETY: call to `poll` is safe because `pollfd` is properly initialized, and the
                 // resulting mutable pointer references valid memory.
