@@ -34,32 +34,41 @@ jobs:
           command: clippy
           args: --tests
 
+  build:
+    runs-on: ${{matrix.os}}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        target: [x86_64-unknown-linux-gnu, i586-unknown-linux-gnu, i686-unknown-linux-gnu]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install stable
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          target: ${{matrix.target}}
+
+      - name: Build (debug)
+        env:
+          GITHUB_ACTIONS_OS: ${{matrix.os}}
+          RUST_TARGET: ${{matrix.target}}
+        run: cargo test --all --target ${{matrix.target}}
+
+      - name: Build (release)
+        env:
+          GITHUB_ACTIONS_OS: ${{matrix.os}}
+          RUST_TARGET: ${{matrix.target}}
+        run: cargo test --all --release --target ${{matrix.target}}
+
   test:
     runs-on: ${{matrix.os}}
     strategy:
       matrix:
         os: [ubuntu-latest]
-        target:
-          - debian: null
-            cross: null
-            rust: null
-        llvm_version: ["5.0", "9.0"]
-        main_tests: [1]
-        release_build: [0, 1]
-        no_default_features: [0, 1]
-        # FIXME: There are no pre-built static libclang libraries, so the
-        # `static` feature is not testable atm.
-        feature_runtime: [0, 1]
-        feature_extra_asserts: [0]
-
-        include:
-          # Test with extra asserts + docs just with latest llvm versions to
-          # prevent explosion
-          - os: ubuntu-latest
-            llvm_version: "9.0"
-            release_build: 0
-            no_default_features: 0
-            feature_extra_asserts: 1
+        target: [x86_64-unknown-linux-gnu, i586-unknown-linux-gnu, i686-unknown-linux-gnu]
 
     steps:
       - uses: actions/checkout@v3
@@ -70,18 +79,15 @@ jobs:
           profile: minimal
           toolchain: stable
           target: ${{matrix.target.rust}}
-      - name: Install libtinfo
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install libtinfo5
+
       - name: Run all the tests (debug)
         env:
           GITHUB_ACTIONS_OS: ${{matrix.os}}
           RUST_TARGET: ${{matrix.target.rust}}
-        run: cargo test --all
+        run: cargo test --all --target ${{matrix.target}}
+
       - name: Run all the tests (release)
         env:
           GITHUB_ACTIONS_OS: ${{matrix.os}}
           RUST_TARGET: ${{matrix.target.rust}}
-        run: cargo test --all --release
+        run: cargo test --all --release --target ${{matrix.target}}
