@@ -35,41 +35,39 @@ jobs:
           args: --tests
 
   build:
-    runs-on: ${{matrix.os}}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ubuntu-latest]
+        arch: [x86_64]
         target: [x86_64-unknown-linux-gnu, i586-unknown-linux-gnu, i686-unknown-linux-gnu]
-
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install stable
-        uses: actions-rs/toolchain@v1
+      - name: Setup latest Alpine Linux
+        uses: jirutka/setup-alpine@v1
         with:
-          profile: minimal
-          toolchain: stable
-          target: ${{matrix.target}}
+          arch: ${{ matrix.arch }}
+          branch: latest-stable
+          packages: build-base pkgconf lld rustup
+
+      - name: Install Rust stable toolchain via rustup
+        run: rustup-init --target ${{ matrix.target }} --default-toolchain stable --profile minimal -y
+        shell: alpine.sh {0}
 
       - name: Build (debug)
-        env:
-          GITHUB_ACTIONS_OS: ${{matrix.os}}
-          RUST_TARGET: ${{matrix.target}}
-        run: cargo test --all --target ${{matrix.target}}
+        run: cargo build --target ${{ matrix.target }}
+        shell: alpine.sh {0}
 
       - name: Build (release)
-        env:
-          GITHUB_ACTIONS_OS: ${{matrix.os}}
-          RUST_TARGET: ${{matrix.target}}
-        run: cargo test --all --release --target ${{matrix.target}}
+        run: cargo build --release --target ${{ matrix.target }}
+        shell: alpine.sh {0}
 
   test:
-    runs-on: ${{matrix.os}}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ubuntu-latest]
-        target: [x86_64-unknown-linux-gnu, i586-unknown-linux-gnu, i686-unknown-linux-gnu]
-
+        arch: [x86_64]
+        target: [x86_64-unknown-linux-gnu]
     steps:
       - uses: actions/checkout@v3
 
@@ -78,16 +76,9 @@ jobs:
         with:
           profile: minimal
           toolchain: stable
-          target: ${{matrix.target.rust}}
 
       - name: Run all the tests (debug)
-        env:
-          GITHUB_ACTIONS_OS: ${{matrix.os}}
-          RUST_TARGET: ${{matrix.target.rust}}
-        run: cargo test --all --target ${{matrix.target}}
+        run: cargo test --all --target ${{ matrix.target }}
 
       - name: Run all the tests (release)
-        env:
-          GITHUB_ACTIONS_OS: ${{matrix.os}}
-          RUST_TARGET: ${{matrix.target.rust}}
-        run: cargo test --all --release --target ${{matrix.target}}
+        run: cargo test --all --release --target ${{ matrix.target }}
