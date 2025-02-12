@@ -343,8 +343,7 @@ mod tests {
             assert_eq!(prop, exp_prop);
         }
 
-        let exp_udev =
-            Udev::with_properties_list(Arc::clone(&mut null_udev), exp_prop_list.clone());
+        let exp_udev = Udev::with_properties_list(null_udev.clone(), exp_prop_list.clone());
 
         for (prop, exp_prop) in exp_udev
             .properties_list()

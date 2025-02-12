@@ -1823,13 +1823,13 @@ impl UdevDevice {
         } else if let Some(devname) = property.strip_prefix("DEVNAME=") {
             self.set_devnode(devname);
         } else if let Some(devlinks) = property.strip_prefix("DEVLINKS=") {
-            for link in devlinks.split(|s| s == ' ') {
+            for link in devlinks.split(' ') {
                 if !link.is_empty() && !link.starts_with('\0') {
                     self.add_devlink(link);
                 }
             }
         } else if let Some(tags) = property.strip_prefix("TAGS=") {
-            for tag in tags.split(|s| s == ':') {
+            for tag in tags.split(':') {
                 if !tag.is_empty() && !tag.starts_with('\0') {
                     self.add_tag(tag)?;
                 }
