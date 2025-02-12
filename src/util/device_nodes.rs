@@ -5,8 +5,8 @@ pub fn whitelisted_char_for_devnode(c: char, white: &str) -> bool {
     c.is_ascii_digit()
         || c.is_ascii_uppercase()
         || c.is_ascii_lowercase()
-        || "#+-.:=@_".contains(|s| s == c)
-        || white.contains(|s| s == c)
+        || "#+-.:=@_".contains(c)
+        || white.contains(c)
 }
 
 /// Encodes a `devnode` name, removing potentially dangerous characters.
@@ -14,9 +14,10 @@ pub fn encode_devnode_name(arg: &str) -> Result<String> {
     if arg.is_empty() {
         Err(Error::UdevUtil("empty encode string".into()))
     } else {
-        let mut ret = String::with_capacity(arg.as_bytes().len().saturating_mul(4));
+        let arg_len = arg.len();
+        let mut ret = String::with_capacity(arg_len.saturating_mul(4));
         // check for a nul-terminated string
-        let null_pos = arg.find(|c| c == '\0').unwrap_or(arg.len());
+        let null_pos = arg.find('\0').unwrap_or(arg_len);
 
         for c in arg[..null_pos].chars() {
             let seqlen = c.len_utf8();
