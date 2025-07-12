@@ -16,11 +16,48 @@ pub enum Error {
     UdevQueue(String),
     UdevUtil(String),
     Io(String),
+    StdIo {
+        kind: std::io::ErrorKind,
+        err: String,
+    },
+}
+
+impl Error {
+    /// Convenience function to create a I/O error.
+    pub fn std_io<S: Into<String>>(kind: std::io::ErrorKind, err: S) -> Self {
+        Self::StdIo {
+            kind,
+            err: err.into(),
+        }
+    }
+
+    /// Gets the [ErrorKind](std::io::ErrorKind).
+    pub fn kind(&self) -> std::io::ErrorKind {
+        match self {
+            Self::StdIo { kind, .. } => *kind,
+            _ => std::io::ErrorKind::Other,
+        }
+    }
 }
 
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
         Self::Io(format!("{err}"))
+    }
+}
+
+impl From<Error> for std::io::Error {
+    fn from(err: Error) -> Self {
+        match err {
+            Error::StdIo { kind, err } => Self::new(kind, err),
+            err => Self::new(err.kind(), format!("{err}")),
+        }
+    }
+}
+
+impl From<Error> for std::io::ErrorKind {
+    fn from(err: Error) -> Self {
+        err.kind()
     }
 }
 
@@ -54,6 +91,9 @@ impl fmt::Display for Error {
             Self::UdevQueue(err) => write!(f, "udev queue: {err}"),
             Self::UdevUtil(err) => write!(f, "udev util: {err}"),
             Self::Io(err) => write!(f, "I/O: {err}"),
+            Self::StdIo { kind, err } => write!(f, "I/O: kind: {kind}, error: {err}"),
         }
     }
 }
+
+impl std::error::Error for Error {}
