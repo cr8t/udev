@@ -1627,7 +1627,7 @@ impl UdevDevice {
                     Err(_) => continue,
                 };
 
-                let path = format!("{}/{name}", syspath);
+                let path = format!("{syspath}/{name}");
                 let metadata = match fs::metadata(path.as_str()) {
                     Ok(m) => m,
                     Err(_) => continue,
