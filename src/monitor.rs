@@ -201,7 +201,7 @@ impl UdevMonitor {
 
                 log::error!("{err_msg}");
 
-                Err(Error::Io(err_msg))
+                Err(Error::io(errno.kind(), err_msg))
             } else {
                 Ok(udev_monitor)
             }
@@ -796,7 +796,7 @@ impl UdevMonitor {
 
                 log::debug!("{err_msg}");
 
-                Err(Error::std_io(errno.kind(), err_msg))
+                Err(Error::io(errno.kind(), err_msg))
             } else if buflen < 32 || smsg.msg_flags & libc::MSG_TRUNC != 0 {
                 let err_msg = format!("invalid message length: {buflen}");
 
@@ -896,14 +896,13 @@ impl UdevMonitor {
                 match unsafe { libc::poll(pfd.as_mut_ptr(), pfd_len, 0) } {
                     // retry with the next device
                     ret if ret > 0 => Ok(()),
-                    libc::EWOULDBLOCK => Err(Error::std_io(
+                    libc::EWOULDBLOCK => Err(Error::io(
                         std::io::ErrorKind::WouldBlock,
                         "udev-monitor: receive_device poll would block",
                     )),
-                    err => Err(Error::std_io(
-                        std::io::ErrorKind::Other,
-                        format!("device did not pass filter, no queued devices: {err}"),
-                    )),
+                    err => Err(Error::io_other(format!(
+                        "device did not pass filter, no queued devices: {err}"
+                    ))),
                 }?;
             } else {
                 return Ok(udev_device);
