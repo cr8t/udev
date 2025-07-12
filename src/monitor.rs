@@ -1102,6 +1102,24 @@ impl UdevMonitor {
     }
 }
 
+impl std::os::fd::AsRawFd for UdevMonitor {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.sock()
+    }
+}
+
+impl std::os::fd::AsFd for UdevMonitor {
+    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        use std::os::fd::AsRawFd;
+
+        // Check for required invariants of a BorrowedFd
+        assert!(self.as_raw_fd() != -1, "invalid UdevMonitor socket");
+
+        // SAFETY: this is a safe because it is guaranteed to live as long as UdevMonitor
+        unsafe { std::os::fd::BorrowedFd::borrow_raw(self.as_raw_fd()) }
+    }
+}
+
 fn parse_cmsg(msg_control: &[u8]) -> Result<libc::ucred> {
     let controllen = msg_control.len();
     let header_len = mem::size_of::<libc::cmsghdr>();
