@@ -1,5 +1,6 @@
 //! Connects to a device event source.
 
+use std::os::fd::{AsFd, AsRawFd};
 use std::{cmp, fmt, fs, io, mem, sync::Arc};
 
 use crate::{
@@ -750,6 +751,9 @@ impl UdevMonitor {
     /// switched into blocking mode.
     /// ```
     ///
+    /// If polling, our equivalent of `udev_monitor_get_fd()` are the [AsFd] and [AsRawFd]
+    /// trait implementations.
+    ///
     /// Returns: `Ok(UdevDevice)` on success, `Err(Error)` otherwise.
     // FIXME: break this into smaller functions
     pub fn receive_device(&mut self) -> Result<UdevDevice> {
@@ -792,7 +796,7 @@ impl UdevMonitor {
 
                 log::debug!("{err_msg}");
 
-                Err(Error::UdevMonitor(err_msg))
+                Err(Error::std_io(errno.kind(), err_msg))
             } else if buflen < 32 || smsg.msg_flags & libc::MSG_TRUNC != 0 {
                 let err_msg = format!("invalid message length: {buflen}");
 
@@ -881,7 +885,7 @@ impl UdevMonitor {
             if !self.passes_filter(&mut udev_device) {
                 // if somthing is queued, get next device
                 let mut pfd = [libc::pollfd {
-                    fd: self.sock,
+                    fd: self.as_raw_fd(),
                     events: libc::POLLIN,
                     revents: 0,
                 }];
@@ -889,13 +893,17 @@ impl UdevMonitor {
 
                 // SAFETY: call to `poll` is safe because `pollfd` is properly initialized, and the
                 // resulting mutable pointer references valid memory.
-                if unsafe { libc::poll(pfd.as_mut_ptr(), pfd_len, 0) } > 0 {
+                match unsafe { libc::poll(pfd.as_mut_ptr(), pfd_len, 0) } {
                     // retry with the next device
-                    Ok(())
-                } else {
-                    Err(Error::UdevMonitor(
-                        "device did not pass filter, no queued devices".into(),
-                    ))
+                    ret if ret > 0 => Ok(()),
+                    libc::EWOULDBLOCK => Err(Error::std_io(
+                        std::io::ErrorKind::WouldBlock,
+                        "udev-monitor: receive_device poll would block",
+                    )),
+                    err => Err(Error::std_io(
+                        std::io::ErrorKind::Other,
+                        format!("device did not pass filter, no queued devices: {err}"),
+                    )),
                 }?;
             } else {
                 return Ok(udev_device);
@@ -1102,16 +1110,14 @@ impl UdevMonitor {
     }
 }
 
-impl std::os::fd::AsRawFd for UdevMonitor {
+impl AsRawFd for UdevMonitor {
     fn as_raw_fd(&self) -> std::os::fd::RawFd {
         self.sock()
     }
 }
 
-impl std::os::fd::AsFd for UdevMonitor {
+impl AsFd for UdevMonitor {
     fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
-        use std::os::fd::AsRawFd;
-
         // Check for required invariants of a BorrowedFd
         assert!(self.as_raw_fd() != -1, "invalid UdevMonitor socket");
 
