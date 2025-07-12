@@ -16,7 +16,7 @@ impl Udev {
         // get the basename of the symlinked target
         Ok(link
             .components()
-            .last()
+            .next_back()
             .ok_or(Error::Io("empty sys core link value".into()))?
             .as_os_str()
             .to_str()
