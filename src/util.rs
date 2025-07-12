@@ -17,11 +17,11 @@ impl Udev {
         Ok(link
             .components()
             .next_back()
-            .ok_or(Error::Io("empty sys core link value".into()))?
+            .ok_or(Error::io_other("empty sys core link value"))?
             .as_os_str()
             .to_str()
-            .ok_or(Error::Io(
-                "sys core link OS string contains non-Unicode bytes".into(),
+            .ok_or(Error::io_other(
+                "sys core link OS string contains non-Unicode bytes",
             ))?
             .to_owned())
     }

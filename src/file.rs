@@ -75,6 +75,6 @@ pub fn name_to_handle_at(
 
         log::warn!("{errmsg}");
 
-        Err(Error::Io(errmsg))
+        Err(Error::io(errno.kind(), errmsg))
     }
 }
